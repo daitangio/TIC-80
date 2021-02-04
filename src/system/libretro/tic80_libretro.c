@@ -21,10 +21,6 @@
 // The maximum amount of inputs (2, 3 or 4)
 #define TIC_MAXPLAYERS 4
 
-// How long to wait before hiding the mouse.
-// TODO: Move the timer start count to a variable.
-#define TIC_LIBRETRO_MOUSE_HIDE_TIMER_START 300
-
 static struct retro_log_callback logging;
 static retro_log_printf_t log_cb;
 static retro_video_refresh_t video_cb;
@@ -42,7 +38,8 @@ struct tic80_state
 	u8 mouseCursor;
 	u16 mousePreviousX;
 	u16 mousePreviousY;
-	u16 mouseHideTimer;
+	int mouseHideTimer;
+	int mouseHideTimerStart;
 	tic80* tic;
 };
 static struct tic80_state* state;
@@ -115,7 +112,7 @@ RETRO_API void retro_init(void)
 	state->mouseCursor = 0;
 	state->mousePreviousX = 0;
 	state->mousePreviousY = 0;
-	state->mouseHideTimer = TIC_LIBRETRO_MOUSE_HIDE_TIMER_START;
+	state->mouseHideTimer = state->mouseHideTimerStart;
 
 	// Initialize the keyboard mappings.
 	state->keymap[RETROK_UNKNOWN] = tic_key_unknown;
@@ -443,10 +440,10 @@ void tic80_libretro_update_gamepad(tic80_gamepad* gamepad, int player)
  * @see tic80_libretro_update_mouse()
  * @see RETRO_DEVICE_POINTER
  */
-int tic80_libretro_mouse_pointer_convert(float coord, float full, int padding)
+int tic80_libretro_mouse_pointer_convert(float coord, float full)
 {
 	float max = 0x7fff;
-	return (int)((coord + max) / (max * 2.0f) * full) - padding;
+	return (int)((coord + max) / (max * 2.0f) * full);
 }
 
 /**
@@ -469,12 +466,10 @@ void tic80_libretro_update_mouse(tic80_mouse* mouse)
 		// Get the Pointer X and Y, and convert it to screen position.
 		mouse->x = tic80_libretro_mouse_pointer_convert(
 			input_state_cb(0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_X),
-			TIC80_FULLWIDTH,
-			TIC80_OFFSET_LEFT);
+			TIC80_FULLWIDTH);
 		mouse->y = tic80_libretro_mouse_pointer_convert(
 			input_state_cb(0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_Y),
-			TIC80_FULLHEIGHT,
-			TIC80_OFFSET_TOP);
+			TIC80_FULLHEIGHT);
 
 		// Pointer pressed is considered mouse left button.
 		mouse->left = input_state_cb(0, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_PRESSED);
@@ -483,11 +478,11 @@ void tic80_libretro_update_mouse(tic80_mouse* mouse)
 	}
 
 	// Keep the mouse on the screen.
-	if (mouse->x > TIC80_WIDTH) {
-		mouse->x = TIC80_WIDTH;
+	if (mouse->x >= TIC80_FULLWIDTH) {
+		mouse->x = TIC80_FULLWIDTH-1;
 	}
-	if (mouse->y > TIC80_HEIGHT) {
-		mouse->y = TIC80_HEIGHT;
+	if (mouse->y >= TIC80_FULLHEIGHT) {
+		mouse->y = TIC80_FULLHEIGHT-1;
 	}
 	if (mouse->x < 0) {
 		mouse->x = 0;
@@ -498,7 +493,7 @@ void tic80_libretro_update_mouse(tic80_mouse* mouse)
 
 	// Have the mouse disappear after a certain time of inactivity.
 	if (mouse->x != state->mousePreviousX || mouse->y != state->mousePreviousY) {
-		state->mouseHideTimer = TIC_LIBRETRO_MOUSE_HIDE_TIMER_START;
+		state->mouseHideTimer = state->mouseHideTimerStart;
 		state->mousePreviousX = mouse->x;
 		state->mousePreviousY = mouse->y;
 	}
@@ -526,7 +521,7 @@ void tic80_libretro_update_mouse(tic80_mouse* mouse)
 void tic80_libretro_mousecursor(tic80_local* game, tic80_mouse* mouse, int cursortype)
 {
 	// Only draw the mouse cursor if it's active.
-	if (state->mouseHideTimer <= 0) {
+	if (state->mouseHideTimer == 0) {
 		return;
 	}
 
@@ -654,6 +649,20 @@ void tic80_libretro_variables(void)
 		}
 		else if (strcmp(var.value, "arrow") == 0) {
 			state->mouseCursor = 3;
+		}
+	}
+
+	// Mouse Hide Delay
+	state->mouseHideTimerStart = -1;
+	var.key = "tic80_mouse_hide_delay";
+	var.value = NULL;
+	if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
+		state->mouseHideTimerStart = atoi(var.value);
+		if (state->mouseHideTimerStart > 0) {
+			state->mouseHideTimerStart = state->mouseHideTimerStart * TIC80_FRAMERATE;
+		}
+		else {
+			state->mouseHideTimerStart = -1;
 		}
 	}
 }

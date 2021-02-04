@@ -810,7 +810,7 @@ static SQInteger squirrel_sfx(HSQUIRRELVM vm)
         s32 octave = -1;
         s32 duration = -1;
         s32 channel = 0;
-        s32 volume = MAX_VOLUME;
+        s32 volumes[TIC_STEREO_CHANNELS] = {MAX_VOLUME, MAX_VOLUME};
         s32 speed = SFX_DEF_SPEED;
 
         s32 index = getSquirrelNumber(vm, 2);
@@ -856,7 +856,18 @@ static SQInteger squirrel_sfx(HSQUIRRELVM vm)
 
                         if(top >= 6)
                         {
-                            volume = getSquirrelNumber(vm, 6);
+                            if(OT_ARRAY == sq_gettype(vm, 6))
+                            {
+                                for(s32 i = 0; i < COUNT_OF(volumes); i++)
+                                {
+                                    sq_pushinteger(vm, (SQInteger)i);
+                                    sq_rawget(vm, 6);
+                                    if(sq_gettype(vm, -1) & (OT_FLOAT|OT_INTEGER))
+                                        volumes[i] = getSquirrelNumber(vm, -1);
+                                    sq_poptop(vm);
+                                }
+                            }
+                            else volumes[0] = volumes[1] = getSquirrelNumber(vm, 6);
 
                             if(top >= 7)
                             {
@@ -869,7 +880,7 @@ static SQInteger squirrel_sfx(HSQUIRRELVM vm)
 
             if (channel >= 0 && channel < TIC_SOUND_CHANNELS)
             {
-                tic_api_sfx(tic, index, note, octave, duration, channel, volume & 0xf, speed);
+                tic_api_sfx(tic, index, note, octave, duration, channel, volumes[0] & 0xf, volumes[1] & 0xf, speed);
             }
             else return sq_throwerror(vm, "unknown channel\n");
         }
@@ -937,7 +948,7 @@ static SQInteger squirrel_key(HSQUIRRELVM vm)
     {
         tic_key key = getSquirrelNumber(vm, 2);
 
-        if(key < tic_key_escape)
+        if(key < tic_keys_count)
             sq_pushbool(vm, tic_api_key(tic, key) ? SQTrue : SQFalse);
         else
         {
@@ -967,7 +978,7 @@ static SQInteger squirrel_keyp(HSQUIRRELVM vm)
     {
         tic_key key = getSquirrelNumber(vm, 2);
 
-        if(key >= tic_key_escape)
+        if(key >= tic_keys_count)
         {
             return sq_throwerror(vm, "unknown keyboard code\n");
         }
@@ -1121,7 +1132,7 @@ static SQInteger squirrel_print(HSQUIRRELVM vm)
 
         s32 x = 0;
         s32 y = 0;
-        s32 color = TIC_PALETTE_SIZE-1;
+        s32 color = TIC_DEFAULT_COLOR;
         bool fixed = false;
                 bool alt = false;
         s32 scale = 1;
@@ -1182,7 +1193,7 @@ static SQInteger squirrel_trace(HSQUIRRELVM vm)
     if(top >= 2)
     {
         const char* text = printString(vm, 2);
-        u8 color = tic_color_12;
+        u8 color = TIC_DEFAULT_COLOR;
 
         if(top >= 3)
         {
@@ -1258,10 +1269,16 @@ static SQInteger squirrel_mouse(HSQUIRRELVM vm)
     const tic80_mouse* mouse = &core->memory.ram.input.mouse;
 
     sq_newarray(vm, 7);
-    sq_pushinteger(vm, mouse->x);
-    sq_arrayappend(vm, -2);
-    sq_pushinteger(vm, mouse->y);
-    sq_arrayappend(vm, -2);
+
+    {
+        tic_point pos = tic_api_mouse((tic_mem*)core);
+
+        sq_pushinteger(vm, pos.x);
+        sq_arrayappend(vm, -2);
+        sq_pushinteger(vm, pos.y);
+        sq_arrayappend(vm, -2);
+    }
+
     sq_pushbool(vm, mouse->left ? SQTrue : SQFalse);
     sq_arrayappend(vm, -2);
     sq_pushbool(vm, mouse->middle ? SQTrue : SQFalse);

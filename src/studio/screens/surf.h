@@ -29,11 +29,13 @@ typedef struct Surf Surf;
 struct Surf
 {
     tic_mem* tic;
-    struct FileSystem* fs;
+    struct tic_fs* fs;
+    struct tic_net* net;
     struct Console* console;
     struct Movie* state;
 
     bool init;
+    bool loading;
     s32 ticks;
 
     struct

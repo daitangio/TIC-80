@@ -68,26 +68,6 @@ static void readConfigNoSound(Config* config, lua_State* lua)
     lua_pop(lua, 1);
 }
 
-static void readConfigShowSync(Config* config, lua_State* lua)
-{
-    lua_getglobal(lua, "SHOW_SYNC");
-
-    if(lua_isboolean(lua, -1))
-        config->data.showSync = lua_toboolean(lua, -1);
-
-    lua_pop(lua, 1);
-}
-
-static void readConfigCrtMonitor(Config* config, lua_State* lua)
-{
-    lua_getglobal(lua, "CRT_MONITOR");
-
-    if(lua_isboolean(lua, -1))
-        config->data.crtMonitor = lua_toboolean(lua, -1);
-
-    lua_pop(lua, 1);
-}
-
 static void readConfigUiScale(Config* config, lua_State* lua)
 {
     lua_getglobal(lua, "UI_SCALE");
@@ -98,20 +78,47 @@ static void readConfigUiScale(Config* config, lua_State* lua)
     lua_pop(lua, 1);
 }
 
+
+#if defined(CRT_SHADER_SUPPORT)
+static void readConfigCrtMonitor(Config* config, lua_State* lua)
+{
+    lua_getglobal(lua, "CRT_MONITOR");
+
+    if(lua_isboolean(lua, -1))
+        config->data.crtMonitor = lua_toboolean(lua, -1);
+
+    lua_pop(lua, 1);
+}
+
 static void readConfigCrtShader(Config* config, lua_State* lua)
 {
     lua_getglobal(lua, "CRT_SHADER");
 
-    if(lua_isstring(lua, -1))
+    if(lua_type(lua, -1) == LUA_TTABLE)
     {
-        if(!config->data.crtShader)
-            config->data.crtShader = calloc(1, sizeof(tic_code));
+        {
+            lua_getfield(lua, -1, "VERTEX");
 
-        strcpy((char*)config->data.crtShader, lua_tostring(lua, -1));
+            if(lua_isstring(lua, -1))
+                config->data.shader.vertex = strdup(lua_tostring(lua, -1));
+
+            lua_pop(lua, 1);
+        }
+
+        {
+            lua_getfield(lua, -1, "PIXEL");
+
+            if(lua_isstring(lua, -1))
+                config->data.shader.pixel = strdup(lua_tostring(lua, -1));
+
+            lua_pop(lua, 1);
+        }
     }
 
-    lua_pop(lua, 1);
+    lua_pop(lua, 1);        
 }
+
+#endif
 
 static void readCursorTheme(Config* config, lua_State* lua)
 {
@@ -276,11 +283,12 @@ static void readConfig(Config* config)
             readConfigVideoScale(config, lua);
             readConfigCheckNewVersion(config, lua);
             readConfigNoSound(config, lua);
-            readConfigShowSync(config, lua);
+#if defined(CRT_SHADER_SUPPORT)            
             readConfigCrtMonitor(config, lua);
+            readConfigCrtShader(config, lua);
+#endif
             readConfigUiScale(config, lua);
             readTheme(config, lua);
-            readConfigCrtShader(config, lua);
         }
 
         lua_close(lua);
@@ -329,7 +337,7 @@ static void saveConfig(Config* config, bool overwrite)
     {
         s32 size = tic_cart_save(&config->cart, buffer);
 
-        fsSaveRootFile(config->fs, CONFIG_TIC_PATH, buffer, size, overwrite);
+        tic_fs_saveroot(config->fs, CONFIG_TIC_PATH, buffer, size, overwrite);
 
         free(buffer);
     }
@@ -350,7 +358,7 @@ static void save(Config* config)
     studioConfigChanged();
 }
 
-void initConfig(Config* config, tic_mem* tic, FileSystem* fs)
+void initConfig(Config* config, tic_mem* tic, tic_fs* fs)
 {
     {
         config->tic = tic;
@@ -362,7 +370,7 @@ void initConfig(Config* config, tic_mem* tic, FileSystem* fs)
     setDefault(config);
 
     s32 size = 0;
-    u8* data = (u8*)fsLoadRootFile(fs, CONFIG_TIC_PATH, &size);
+    u8* data = (u8*)tic_fs_loadroot(fs, CONFIG_TIC_PATH, &size);
 
     if(data)
     {
@@ -377,5 +385,11 @@ void initConfig(Config* config, tic_mem* tic, FileSystem* fs)
 
 void freeConfig(Config* config)
 {
+#if defined(CRT_SHADER_SUPPORT)
+
+    free((void*)config->data.shader.vertex);
+    free((void*)config->data.shader.pixel);
+#endif
+
     free(config);
 }

@@ -24,6 +24,8 @@
 
 #include "studio/studio.h"
 
+typedef void(*fs_done_callback)(void* data);
+
 typedef enum
 {
     CART_SAVE_OK,
@@ -63,14 +65,6 @@ struct Console
 
     struct
     {
-        char fileName[TICNAME_MAX];
-        bool active;
-
-        void(*reload)(Console*, char*);
-    } codeLiveReload;
-
-    struct
-    {
         bool yes;
         tic_cartridge* file;
     } embed;
@@ -83,27 +77,26 @@ struct Console
 
     tic_mem* tic;
 
-    struct FileSystem* fs;
+    struct tic_fs* fs;
+    struct tic_net* net;
 
-    char romName[TICNAME_MAX];
-    char appPath[TICNAME_MAX];
+    struct
+    {
+        char name[TICNAME_MAX];
+        char path[TICNAME_MAX];
+    } rom;
 
     HistoryItem* history;
     HistoryItem* historyHead;
 
     u32 tickCounter;
 
-    struct
-    {
-        bool active;
-        bool showGameMenu;
-        bool startSurf;
-        bool skipStart;
-        bool goFullscreen;
-        bool crtMonitor;
-    };
+    bool active;
+    bool showGameMenu;
+    StartArgs args;
 
-    void(*load)(Console*, const char* path, const char* hash);
+    void(*load)(Console*, const char* path);
+    void(*loadByHash)(Console*, const char* name, const char* hash, fs_done_callback callback, void* data);
     void(*updateProject)(Console*);
     void(*error)(Console*, const char*);
     void(*trace)(Console*, const char*, u8 color);
@@ -112,5 +105,5 @@ struct Console
     CartSaveResult(*save)(Console*);
 };
 
-void initConsole(Console*, tic_mem*, struct FileSystem* fs, struct Config* config, s32 argc, char **argv);
+void initConsole(Console*, tic_mem*, struct tic_fs* fs, struct tic_net* net, struct Config* config, StartArgs args);
 void freeConsole(Console* console);

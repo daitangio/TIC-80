@@ -109,7 +109,7 @@ static void tick(Run* run)
 
     if(memcmp(run->pmem.data, tic->ram.persistent.data, Size))
     {
-        fsSaveRootFile(run->console->fs, run->saveid, &tic->ram.persistent, Size, true);
+        tic_fs_saveroot(run->console->fs, run->saveid, &tic->ram.persistent, Size, true);
         memcpy(run->pmem.data, tic->ram.persistent.data, Size);
     }
 
@@ -119,11 +119,21 @@ static void tick(Run* run)
 
 static bool forceExit(void* data)
 {
-    getSystem()->poll();
+    tic_sys_poll();
 
     tic_mem* tic = ((Run*)data)->tic;
 
     return tic_api_key(tic, tic_key_escape);
+}
+
+static u64 getFreq(void* data)
+{
+    return tic_sys_freq_get();
+}
+
+static u64 getCounter(void* data)
+{
+    return tic_sys_counter_get();
 }
 
 void initRun(Run* run, Console* console, tic_mem* tic)
@@ -138,8 +148,8 @@ void initRun(Run* run, Console* console, tic_mem* tic)
         {
             .error = onError,
             .trace = onTrace,
-            .counter = getSystem()->getPerformanceCounter,
-            .freq = getSystem()->getPerformanceFrequency,
+            .counter = getCounter,
+            .freq = getFreq,
             .start = 0,
             .data = run,
             .exit = onExit,
@@ -154,7 +164,7 @@ void initRun(Run* run, Console* console, tic_mem* tic)
         initPMemName(run);
 
         s32 size = 0;
-        void* data = fsLoadRootFile(run->console->fs, run->saveid, &size);
+        void* data = tic_fs_loadroot(run->console->fs, run->saveid, &size);
 
         if(data)
         {
@@ -166,7 +176,7 @@ void initRun(Run* run, Console* console, tic_mem* tic)
         memcpy(run->pmem.data, tic->ram.persistent.data, Size);
     }
 
-    getSystem()->preseed();
+    tic_sys_preseed();
 }
 
 void freeRun(Run* run)

@@ -1,7 +1,28 @@
+// MIT License
+
+// Copyright (c) 2017 Vadim Grigoruk @nesbox // grigoruk@gmail.com
+
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #pragma once
 
 #include "api.h"
-#include "ext/file_dialog.h"
 #include "version.h"
 
 #if defined(TIC80_PRO)
@@ -12,10 +33,6 @@
 
 #define TIC_MAKE_VERSION(major, minor, patch) ((major) * 10000 + (minor) * 100 + (patch))
 #define TIC_VERSION TIC_MAKE_VERSION(MYPROJ_VERSION_MAJOR, MYPROJ_VERSION_MINOR, MYPROJ_VERSION_PATCH)
-
-#define DEF2STR2(x) #x
-#define DEF2STR(x) DEF2STR2(x)
-
 #define TIC_VERSION_LABEL DEF2STR(TIC_VERSION_MAJOR) "." DEF2STR(TIC_VERSION_MINOR) "." DEF2STR(TIC_VERSION_REVISION) TIC_VERSION_STATUS TIC_VERSION_POST
 #define TIC_PACKAGE "com.nesbox.tic"
 #define TIC_NAME "TIC-80"
@@ -24,79 +41,28 @@
 #define TIC_HTTP "http://"
 #define TIC_HOST "tic80.com"
 #define TIC_WEBSITE TIC_HTTP TIC_HOST
-#define TIC_YEAR "2020"
-#define TIC_COPYRIGHT TIC_WEBSITE " (C) " TIC_YEAR
+#define TIC_COPYRIGHT TIC_WEBSITE " (C) " TIC_VERSION_YEAR
 
-#define TIC80_OFFSET_LEFT ((TIC80_FULLWIDTH-TIC80_WIDTH)/2)
-#define TIC80_OFFSET_TOP ((TIC80_FULLHEIGHT-TIC80_HEIGHT)/2)
 #define TICNAME_MAX 256
-#define KEYBOARD_HOLD 20
-#define KEYBOARD_PERIOD 3
 
-typedef struct
-{
-    enum
-    {
-        HttpGetProgress,
-        HttpGetDone,
-        HttpGetError,
-    } type;
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-    union
-    {
-        struct
-        {
-            s32 size;
-            s32 total;
-        } progress;
-
-        struct
-        {
-            s32 size;
-            u8* data;
-        } done;
-
-        struct
-        {
-            s32 code;
-        } error;
-    };
-
-    void* calldata;
-    const char* url;
-
-} HttpGetData;
-
-typedef void(*HttpGetCallback)(const HttpGetData*);
-
-typedef struct
-{
-    void    (*setClipboardText)(const char* text);
-    bool    (*hasClipboardText)();
-    char*   (*getClipboardText)();
-    void    (*freeClipboardText)(const char* text);
-
-    u64     (*getPerformanceCounter)();
-    u64     (*getPerformanceFrequency)();
-
-    void* (*httpGetSync)(const char* url, s32* size);
-    void (*httpGet)(const char* url, HttpGetCallback callback, void* userdata);
-
-    void (*fileDialogLoad)(file_dialog_load_callback callback, void* data);
-    void (*fileDialogSave)(file_dialog_save_callback callback, const char* name, const u8* buffer, size_t size, void* data, u32 mode);
-
-    void (*goFullscreen)();
-    void (*showMessageBox)(const char* title, const char* message);
-    void (*setWindowTitle)(const char* title);
-
-    void (*openSystemPath)(const char* path);
-    
-    void (*preseed)();
-    void (*poll)();
-
-    void (*updateConfig)();
-
-} System;
+void    tic_sys_clipboard_set(const char* text);
+bool    tic_sys_clipboard_has();
+char*   tic_sys_clipboard_get();
+void    tic_sys_clipboard_free(const char* text);
+u64     tic_sys_counter_get();
+u64     tic_sys_freq_get();
+void    tic_sys_fullscreen();
+void    tic_sys_message(const char* title, const char* message);
+void    tic_sys_title(const char* title);
+void    tic_sys_open_path(const char* path);
+void    tic_sys_preseed();
+void    tic_sys_poll();
+bool    tic_sys_keyboard_text(char* text);
+void    tic_sys_update_config();
 
 typedef struct
 {
@@ -150,11 +116,18 @@ typedef struct
     
     bool checkNewVersion;
     bool noSound;
-    bool showSync;
+
+#if defined(CRT_SHADER_SUPPORT)
     bool crtMonitor;
+    struct
+    {
+        const char* vertex;
+        const char* pixel;
+    } shader;
+#endif
+    
     bool goFullscreen;
 
-    const char* crtShader;
     const tic_cartridge* cart;
 
     s32 uiScale;
@@ -165,7 +138,6 @@ typedef struct
 {
     tic_mem* tic;
     bool quit;
-    char text;
 
     void (*tick)();
     void (*exit)();
@@ -175,14 +147,8 @@ typedef struct
 
 } Studio;
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-
-TIC80_API Studio* studioInit(s32 argc, char **argv, s32 samplerate, const char* appFolder, System* system);
+Studio* studioInit(s32 argc, const char **argv, s32 samplerate, const char* appFolder);
 
 #ifdef __cplusplus
 }
 #endif
-

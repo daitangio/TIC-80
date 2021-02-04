@@ -4,6 +4,7 @@ set(VERSION_MAJOR 0)
 set(VERSION_MINOR 90)
 set(VERSION_REVISION 0)
 set(VERSION_STATUS "-dev")
+string(TIMESTAMP VERSION_YEAR "%Y")
 
 find_package(Git)
 if(Git_FOUND)
@@ -35,7 +36,7 @@ message("PROJECT_VERSION: ${PROJECT_VERSION}${VERSION_STATUS}")
 
 configure_file("${PROJECT_SOURCE_DIR}/version.h.in" "${CMAKE_CURRENT_BINARY_DIR}/version.h")
 
-if(ANDROID OR EMSCRIPTEN OR N3DS)
+if(ANDROID OR EMSCRIPTEN OR N3DS OR RPI)
     set(BUILD_LIBRETRO_DEFAULT OFF)
     set(BUILD_DEMO_CARTS_DEFAULT OFF)
     set(BUILD_PLAYER_DEFAULT OFF)
@@ -45,80 +46,31 @@ else()
     set(BUILD_PLAYER_DEFAULT ON)
 endif()
 
+set(BUILD_TOUCH_INPUT_DEFAULT ${ANDROID})
+
 option(BUILD_SDL "SDL Enabled" ON)
+option(BUILD_SDLGPU "SDL GPU Enabled" OFF)
 option(BUILD_SOKOL "Sokol Enabled" OFF)
 option(BUILD_LIBRETRO "libretro Enabled" ${BUILD_LIBRETRO_DEFAULT})
 option(BUILD_DEMO_CARTS "Demo Carts Enabled" ${BUILD_DEMO_CARTS_DEFAULT})
 option(BUILD_PRO "Build PRO version" FALSE)
 option(BUILD_PLAYER "Build standalone players" ${BUILD_PLAYER_DEFAULT})
+option(BUILD_TOUCH_INPUT "Build with touch input support" ${BUILD_TOUCH_INPUT_DEFAULT})
+
+if(NOT BUILD_SDL)
+    set(BUILD_SDLGPU OFF)
+endif()
+
+message("BUILD_SDLGPU: ${BUILD_SDLGPU}")
+message("BUILD_TOUCH_INPUT: ${BUILD_TOUCH_INPUT}")
 
 if (N3DS)
     set(BUILD_SDL off)
-    # disable CURL linking - use HTTPC instead
-    set(DISABLE_NETWORKING TRUE)
-    option(N3DS_BUILD_CIA "Build .cia variant - requires bannertool and makerom" FALSE)
 endif()
 
 if (BAREMETALPI)
-
-    set(BUILD_SDL off)
+    set(BUILD_SDL OFF)
     set(BUILD_DEMO_CARTS OFF)
-
-    set(CMAKE_SYSTEM_NAME Generic)
-    set(CMAKE_SYSTEM_PROCESSOR ARM)
-
-    if(MINGW OR CYGWIN OR WIN32)
-        set(UTIL_SEARCH_CMD where)
-    elseif(UNIX OR APPLE)
-        set(UTIL_SEARCH_CMD which)
-    endif()
-
-    set(TOOLCHAIN_PREFIX arm-none-eabi-)
-
-    execute_process(
-      COMMAND ${UTIL_SEARCH_CMD} ${TOOLCHAIN_PREFIX}gcc
-      OUTPUT_VARIABLE BINUTILS_PATH
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    message("Crosscompiler path is ${BINUTILS_PATH}")
-    get_filename_component(ARM_TOOLCHAIN_DIR ${BINUTILS_PATH} DIRECTORY)
-
-    # Without that flag CMake is not able to pass test compilation check
-    if (${CMAKE_VERSION} VERSION_EQUAL "3.6.0" OR ${CMAKE_VERSION} VERSION_GREATER "3.6")
-        set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
-    else()
-        set(CMAKE_EXE_LINKER_FLAGS_INIT "-Wl,-E")
-    endif()
-
-    # removed squirrel language as it doesn't seem to compile under arm. Needs investigation.
-    # Ideally should use the CFLAGS defined in circle build files, not hardwire them here too.
-    # For RPI2
-    #set(CMAKE_C_FLAGS " -DTIC_BUILD_WITH_FENNEL -DTIC_BUILD_WITH_MOON -DTIC_BUILD_WITH_JS -DTIC_BUILD_WITH_WREN -DTIC_BUILD_WITH_LUA -DLUA_32BITS -std=c99 -march=armv7-a+neon-vfpv4  -D AARCH=32 -D __circle__ -D BAREMETALPI  --specs=nosys.specs -O3 -mabi=aapcs -marm  -mfloat-abi=hard -mfpu=neon-vfpv4  -D__DYNAMIC_REENT__")
-    # For RPI3
-    # investigate -funsafe-math-optimizations and -march=armv8-a+crc -mcpu=cortex-a53
-    set(CMAKE_C_FLAGS " -DTIC_BUILD_WITH_FENNEL -DTIC_BUILD_WITH_MOON -DTIC_BUILD_WITH_JS -DTIC_BUILD_WITH_WREN -DTIC_BUILD_WITH_LUA -DLUA_32BITS -std=c99 -march=armv8-a  -D AARCH=32 -mtune=cortex-a53  -D __circle__ -D BAREMETALPI  --specs=nosys.specs -O3 -marm -mfloat-abi=hard -mfpu=neon-fp-armv8 -funsafe-math-optimizations -D__DYNAMIC_REENT__")
-
-    set(CMAKE_C_COMPILER ${TOOLCHAIN_PREFIX}gcc)
-    set(CMAKE_ASM_COMPILER ${CMAKE_C_COMPILER})
-    set(CMAKE_CXX_COMPILER ${TOOLCHAIN_PREFIX}g++)
-
-    set(CMAKE_OBJCOPY ${ARM_TOOLCHAIN_DIR}/${TOOLCHAIN_PREFIX}objcopy CACHE INTERNAL "objcopy tool")
-    set(CMAKE_SIZE_UTIL ${ARM_TOOLCHAIN_DIR}/${TOOLCHAIN_PREFIX}size CACHE INTERNAL "size tool")
-
-    set(CMAKE_SYSROOT ${ARM_TOOLCHAIN_DIR}/../arm-none-eabi)
-    set(CMAKE_FIND_ROOT_PATH ${BINUTILS_PATH})
-    set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
-    set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
-    set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
-
-endif()
-
-if(EMSCRIPTEN)
-    set(DISABLE_NETWORKING TRUE)
-endif()
-
-if (DISABLE_NETWORKING)
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DDISABLE_NETWORKING")
 endif()
 
 if(UNIX AND NOT APPLE AND NOT EMSCRIPTEN AND NOT ANDROID AND NOT N3DS)
@@ -354,7 +306,7 @@ endif()
 ################################
 # SDL2
 ################################
-if(BUILD_SDL AND NOT EMSCRIPTEN)
+if(BUILD_SDL AND NOT EMSCRIPTEN AND NOT RPI)
 
     if(WIN32)
         set(HAVE_LIBC TRUE)
@@ -374,9 +326,9 @@ endif()
 # SDL2 standalone cart player
 ################################
 
-if(BUILD_SDL AND BUILD_PLAYER)
+if(BUILD_SDL AND BUILD_PLAYER AND NOT RPI)
 
-    add_executable(player-sdl WIN32 ${CMAKE_SOURCE_DIR}/src/player/sdl.c)
+    add_executable(player-sdl WIN32 ${CMAKE_SOURCE_DIR}/src/system/sdl/player.c)
 
     target_include_directories(player-sdl PRIVATE 
         ${THIRDPARTY_DIR}/sdl2/include 
@@ -385,6 +337,7 @@ if(BUILD_SDL AND BUILD_PLAYER)
 
     if(MINGW)
         target_link_libraries(player-sdl mingw32)
+        target_link_options(player-sdl PRIVATE -static)
     endif()
 
     target_link_libraries(player-sdl tic80core SDL2-static SDL2main)
@@ -444,10 +397,11 @@ endif()
 
 if(BUILD_PLAYER AND BUILD_SOKOL)
 
-    add_executable(player-sokol WIN32 ${CMAKE_SOURCE_DIR}/src/player/sokol.c)
+    add_executable(player-sokol WIN32 ${CMAKE_SOURCE_DIR}/src/system/sokol/player.c)
 
     if(MINGW)
         target_link_libraries(player-sokol mingw32)
+        target_link_options(player-sokol PRIVATE -static)
     endif()
 
     target_include_directories(player-sokol PRIVATE 
@@ -508,33 +462,6 @@ if(BUILD_LIBRETRO)
 endif()
 
 ################################
-# CURL
-################################
-
-if (NOT DISABLE_NETWORKING)
-
-if (NOT N3DS)
-
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "")
-
-if(WIN32)
-    set(CURL_STATIC_CRT ON CACHE BOOL "")
-endif()
-
-set(CMAKE_USE_OPENSSL OFF CACHE BOOL "" )
-set(CMAKE_USE_LIBSSH2 OFF CACHE BOOL "")
-set(HTTP_ONLY ON CACHE BOOL "")
-set(BUILD_CURL_EXE OFF CACHE BOOL "")
-set(CURL_CA_BUNDLE "none" CACHE STRING "")
-set(CURL_CA_PATH "none" CACHE STRING "")
-
-add_subdirectory(${THIRDPARTY_DIR}/curl)
-
-endif()
-
-endif()
-
-################################
 # ZLIB
 ################################
 
@@ -573,13 +500,13 @@ endif ()
 set(CMAKE_DISABLE_TESTING ON CACHE BOOL "" FORCE)
 add_subdirectory(${THIRDPARTY_DIR}/zip)
 
-set(TOOLS_DIR ${CMAKE_SOURCE_DIR}/build/tools)
-
 ################################
 # bin2txt cart2prj prj2cart
 ################################
 
 if(BUILD_DEMO_CARTS)
+
+    set(TOOLS_DIR ${CMAKE_SOURCE_DIR}/build/tools)
 
     add_executable(cart2prj ${TOOLS_DIR}/cart2prj.c ${CMAKE_SOURCE_DIR}/src/studio/project.c)
     target_include_directories(cart2prj PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
@@ -626,11 +553,66 @@ add_library(wave_writer STATIC ${THIRDPARTY_DIR}/blip-buf/wave_writer.c)
 target_include_directories(wave_writer INTERFACE ${THIRDPARTY_DIR}/blip-buf)
 
 ################################
-# TIC-80 lib
+# ArgParse lib
+################################
+
+add_library(argparse STATIC ${THIRDPARTY_DIR}/argparse/argparse.c)
+target_include_directories(argparse INTERFACE ${THIRDPARTY_DIR}/argparse)
+
+################################
+# CURL
+################################
+
+if(NOT N3DS AND NOT EMSCRIPTEN AND NOT BAREMETALPI)
+    set(USE_CURL TRUE)
+endif()
+
+if (USE_CURL)
+
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "")
+
+    if(WIN32)
+        set(CURL_STATIC_CRT ON CACHE BOOL "")
+    endif()
+
+    set(CMAKE_USE_OPENSSL OFF CACHE BOOL "" )
+    set(CMAKE_USE_LIBSSH2 OFF CACHE BOOL "")
+    set(HTTP_ONLY ON CACHE BOOL "")
+    set(BUILD_CURL_EXE OFF CACHE BOOL "")
+    set(CURL_CA_BUNDLE "none" CACHE STRING "")
+    set(CURL_CA_PATH "none" CACHE STRING "")
+
+    if(RPI)
+        set(CURL_ZLIB OFF CACHE BOOL "" )
+    endif()
+
+    add_subdirectory(${THIRDPARTY_DIR}/curl)
+
+endif()
+
+################################
+# libuv
+################################
+
+if(USE_LIBUV)
+    add_subdirectory(${THIRDPARTY_DIR}/libuv)
+endif()
+
+################################
+# HTTP parser
+################################
+
+if(USE_LIBUV)
+    add_library(http_parser STATIC ${THIRDPARTY_DIR}/http-parser/http_parser.c)
+    target_include_directories(http_parser INTERFACE ${THIRDPARTY_DIR}/http-parser)
+endif()
+
+################################
+# TIC-80 studio
 ################################
 
 set(TIC80LIB_DIR ${CMAKE_SOURCE_DIR}/src)
-set(TIC80LIB_SRC
+set(TIC80STUDIO_SRC
     ${TIC80LIB_DIR}/studio/screens/console.c
     ${TIC80LIB_DIR}/studio/screens/run.c
     ${TIC80LIB_DIR}/studio/screens/dialog.c
@@ -647,46 +629,46 @@ set(TIC80LIB_SRC
     ${TIC80LIB_DIR}/studio/config.c
     ${TIC80LIB_DIR}/studio/project.c
     ${TIC80LIB_DIR}/studio/fs.c
+    ${TIC80LIB_DIR}/studio/net.c
     ${TIC80LIB_DIR}/ext/md5.c
     ${TIC80LIB_DIR}/ext/gif.c
     ${TIC80LIB_DIR}/ext/history.c
-    ${TIC80LIB_DIR}/ext/net.c
 )
 
 set(TIC80_OUTPUT tic80)
 
-add_library(${TIC80_OUTPUT}lib STATIC ${TIC80LIB_SRC} ${DEMO_CARTS_OUT})
+add_library(tic80studio STATIC ${TIC80STUDIO_SRC} ${DEMO_CARTS_OUT})
 
 if(WIN32)
-    target_include_directories(${TIC80_OUTPUT}lib PRIVATE ${THIRDPARTY_DIR}/dirent/include)
+    target_include_directories(tic80studio PRIVATE ${THIRDPARTY_DIR}/dirent/include)
 endif()
 
-target_include_directories(${TIC80_OUTPUT}lib PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
+target_include_directories(tic80studio PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
 
-target_link_libraries(${TIC80_OUTPUT}lib tic80core zip wave_writer)
+target_link_libraries(tic80studio tic80core zip wave_writer argparse)
 
-if(N3DS)
-    target_include_directories(${TIC80_OUTPUT}lib PRIVATE ${DEVKITPRO}/portlibs/3ds/include)
-    target_link_directories(${TIC80_OUTPUT}lib PUBLIC ${DEVKITPRO}/portlibs/3ds/lib)
+if(USE_CURL)
+    target_link_libraries(tic80studio libcurl)
 endif()
 
-if(NOT DISABLE_NETWORKING)
-if(N3DS)
-    target_link_libraries(${TIC80_OUTPUT}lib curl mbedtls mbedx509 mbedcrypto)
-else()
-    target_link_libraries(${TIC80_OUTPUT}lib libcurl)
-endif()
+if(USE_LIBUV)
+    target_compile_definitions(tic80studio PRIVATE USE_LIBUV)
+    target_link_libraries(tic80studio uv_a http_parser)
 endif()
 
 if(BUILD_PRO)
-    target_compile_definitions(tic80lib PRIVATE TIC80_PRO)
+    target_compile_definitions(tic80studio PRIVATE TIC80_PRO)
+endif()
+
+if(BUILD_SDLGPU)
+    target_compile_definitions(tic80studio PUBLIC CRT_SHADER_SUPPORT)
 endif()
 
 ################################
 # SDL GPU
 ################################
 
-if(BUILD_SDL)
+if(BUILD_SDLGPU)
 
 set(SDLGPU_DIR ${THIRDPARTY_DIR}/sdl-gpu/src)
 set(SDLGPU_SRC
@@ -762,47 +744,34 @@ endif()
 
 if(BUILD_SDL)
 
-    set(TIC80_SRC ${CMAKE_SOURCE_DIR}/src/ext/file_dialog.c)
-
-    if(APPLE)
-        set(TIC80_SRC ${TIC80_SRC} ${CMAKE_SOURCE_DIR}/src/ext/file_dialog.m)
-    endif()
-
-    set(TIC80_SRC ${TIC80_SRC} src/system/sdl/sdlgpu.c)
+    set(TIC80_SRC src/system/sdl/main.c)
 
     if(WIN32)
         
         configure_file("${PROJECT_SOURCE_DIR}/build/windows/tic80.rc.in" "${PROJECT_SOURCE_DIR}/build/windows/tic80.rc")
         set(TIC80_SRC ${TIC80_SRC} "${PROJECT_SOURCE_DIR}/build/windows/tic80.rc")
 
-        # Debug build is a console app.
-        if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        else()
-            set(SYSTEM_TYPE WIN32)
-        endif()
-
-        add_executable(${TIC80_OUTPUT} ${SYSTEM_TYPE} ${TIC80_SRC})
+        add_executable(tic80 ${SYSTEM_TYPE} ${TIC80_SRC})
 
     elseif(ANDROID)
 
         set(TIC80_SRC ${TIC80_SRC} ${ANDROID_NDK}/sources/android/cpufeatures/cpu-features.c)
 
-        add_library(${TIC80_OUTPUT} SHARED ${TIC80_SRC})
+        add_library(tic80 SHARED ${TIC80_SRC})
 
-        target_link_libraries(${TIC80_OUTPUT} hidapi)
+        target_link_libraries(tic80 hidapi)
 
     else()
-        add_executable(${TIC80_OUTPUT} ${TIC80_SRC})
+        add_executable(tic80 ${TIC80_SRC})
     endif()
 
-    target_include_directories(${TIC80_OUTPUT} PRIVATE ${CMAKE_SOURCE_DIR}/src)
-
     if(MINGW)
-        target_link_libraries(${TIC80_OUTPUT} mingw32)
+        target_link_libraries(tic80 mingw32)
+        target_link_options(tic80 PRIVATE -static -mconsole)
     endif()
 
     if(EMSCRIPTEN)
-        set_target_properties(${TIC80_OUTPUT} PROPERTIES LINK_FLAGS "-s WASM=1 -s USE_SDL=2 -s TOTAL_MEMORY=67108864 --pre-js ${CMAKE_SOURCE_DIR}/build/html/prejs.js -lidbfs.js")
+        set_target_properties(tic80 PROPERTIES LINK_FLAGS "-s WASM=1 -s USE_SDL=2 -s TOTAL_MEMORY=67108864 -s FETCH=1 --pre-js ${CMAKE_SOURCE_DIR}/build/html/prejs.js -lidbfs.js")
         set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -s USE_SDL=2")
 
         if(CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -810,33 +779,46 @@ if(BUILD_SDL)
         endif()
 
     elseif(NOT ANDROID)
-        target_link_libraries(${TIC80_OUTPUT} SDL2main)
+        target_link_libraries(tic80 SDL2main)
     endif()
 
-    target_link_libraries(${TIC80_OUTPUT} ${TIC80_OUTPUT}lib sdlgpu)
+    target_link_libraries(tic80 tic80studio)
+
+    if(BUILD_TOUCH_INPUT)
+        target_compile_definitions(tic80 PRIVATE TOUCH_INPUT_SUPPORT)
+    endif()
+
+    if(RPI)
+        target_include_directories(tic80 PRIVATE ${SYSROOT_PATH}/usr/local/include/SDL2)
+        target_link_directories(tic80 PRIVATE ${SYSROOT_PATH}/usr/local/lib ${SYSROOT_PATH}/opt/vc/lib)
+        target_compile_definitions(tic80 PRIVATE __RPI__)
+    endif()
+
+    if(BUILD_SDLGPU)
+        target_link_libraries(tic80 sdlgpu)
+    else()
+        if(EMSCRIPTEN)
+        elseif(RPI)
+            target_link_libraries(tic80 libSDL2.a bcm_host)
+        else()
+            target_link_libraries(tic80 SDL2-static)
+        endif()
+    endif()
 
     if(LINUX)
-        include(FindPkgConfig)
-        if(NOT PKG_CONFIG_FOUND) 
-            message(FATAL_ERROR "We need pkg-config to compile this project")
-        endif()
 
-        pkg_check_modules(GTK REQUIRED gtk+-3.0)
+        configure_file("${PROJECT_SOURCE_DIR}/build/linux/tic80.desktop.in" "${PROJECT_SOURCE_DIR}/build/linux/tic80.desktop")
 
-        target_include_directories(${TIC80_OUTPUT} PRIVATE ${GTK_INCLUDE_DIRS})
-        target_link_libraries(${TIC80_OUTPUT} ${GTK_LIBRARIES})
+        install(TARGETS tic80 DESTINATION bin)
 
-        install(TARGETS ${TIC80_OUTPUT} DESTINATION bin)
- 
-        SET(TIC80_DESKTOP_DIR     "/usr/share/applications/")
-        SET(TIC80_PIXMAPS_DIR     "/usr/share/icons/")
+        SET(TIC80_DESKTOP_DIR     "share/applications/")
+        SET(TIC80_PIXMAPS_DIR     "share/icons/")
 
         install (FILES ${PROJECT_SOURCE_DIR}/build/linux/tic80.desktop DESTINATION ${TIC80_DESKTOP_DIR})
         install (FILES ${PROJECT_SOURCE_DIR}/build/linux/tic80.xml DESTINATION ${TIC80_DESKTOP_DIR})
         install (FILES ${PROJECT_SOURCE_DIR}/build/linux/tic80.png DESTINATION ${TIC80_PIXMAPS_DIR})
 
     endif()
-
 endif()
 
 ################################
@@ -845,47 +827,29 @@ endif()
 
 if(BUILD_SOKOL)
 
-    set(TIC80_SRC ${CMAKE_SOURCE_DIR}/src/ext/file_dialog.c)
-
-    if(APPLE)
-        set(TIC80_SRC ${TIC80_SRC} ${CMAKE_SOURCE_DIR}/src/ext/file_dialog.m)
-    endif()
-
-    set(TIC80_SRC ${TIC80_SRC} ${CMAKE_SOURCE_DIR}/src/system/sokol/sokol.c)
+    set(TIC80_SRC ${CMAKE_SOURCE_DIR}/src/system/sokol/sokol.c)
 
     if(WIN32)
 
         configure_file("${PROJECT_SOURCE_DIR}/build/windows/tic80.rc.in" "${PROJECT_SOURCE_DIR}/build/windows/tic80.rc")
         set(TIC80_SRC ${TIC80_SRC} "${PROJECT_SOURCE_DIR}/build/windows/tic80.rc")
         
-        add_executable(${TIC80_OUTPUT}-sokol WIN32 ${TIC80_SRC})        
+        add_executable(tic80-sokol WIN32 ${TIC80_SRC})        
     else()
-        add_executable(${TIC80_OUTPUT}-sokol ${TIC80_SRC})
+        add_executable(tic80-sokol ${TIC80_SRC})
     endif()
 
-    target_include_directories(${TIC80_OUTPUT}-sokol PRIVATE 
+    target_include_directories(tic80-sokol PRIVATE 
         ${CMAKE_SOURCE_DIR}/include
         ${CMAKE_SOURCE_DIR}/src
-        ${THIRDPARTY_DIR}/sdl2/include
         ${THIRDPARTY_DIR}/sokol)
 
     if(MINGW)
-        target_link_libraries(${TIC80_OUTPUT}-sokol mingw32)
+        target_link_libraries(tic80-sokol mingw32)
+        target_link_options(tic80-sokol PRIVATE -static -mconsole)
     endif()
 
-    target_link_libraries(${TIC80_OUTPUT}-sokol ${TIC80_OUTPUT}lib sokol)
-
-    if(LINUX)
-        include(FindPkgConfig)
-        if(NOT PKG_CONFIG_FOUND) 
-            message(FATAL_ERROR "We need pkg-config to compile this project")
-        endif()
-
-        pkg_check_modules(GTK REQUIRED gtk+-3.0)
-
-        target_include_directories(${TIC80_OUTPUT}-sokol PRIVATE ${GTK_INCLUDE_DIRS})
-        target_link_libraries(${TIC80_OUTPUT}-sokol ${GTK_LIBRARIES})
-    endif()
+    target_link_libraries(tic80-sokol tic80studio sokol)
 
 endif()
 
@@ -897,31 +861,18 @@ if(N3DS)
     set(TIC80_SRC ${TIC80_SRC}
         ${CMAKE_SOURCE_DIR}/src/system/n3ds/utils.c
         ${CMAKE_SOURCE_DIR}/src/system/n3ds/keyboard.c
-        ${CMAKE_SOURCE_DIR}/src/system/n3ds/net_httpc.c
         ${CMAKE_SOURCE_DIR}/src/system/n3ds/main.c
     )
 
-    if (DISABLE_NETWORKING)
-        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DENABLE_HTTPC")
-    endif()
+    add_executable(tic80_n3ds ${TIC80_SRC})
 
-    add_executable(${TIC80_OUTPUT}_n3ds ${TIC80_SRC})
-
-    target_include_directories(${TIC80_OUTPUT}_n3ds PRIVATE
+    target_include_directories(tic80_n3ds PRIVATE
         ${DEVKITPRO}/portlibs/3ds/include
         ${CMAKE_SOURCE_DIR}/include
         ${CMAKE_SOURCE_DIR}/src)
 
-    target_link_directories(${TIC80_OUTPUT}_n3ds PRIVATE ${DEVKITPRO}/libctru/lib)
-    target_link_libraries(${TIC80_OUTPUT}_n3ds ${TIC80_OUTPUT}lib png citro3d)
-
-    if (N3DS_BUILD_CIA)
-        add_custom_command(TARGET tic80_n3ds
-               POST_BUILD
-                   COMMAND ${CMAKE_SOURCE_DIR}/build/n3ds/elf_to_cia.sh
-               WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/build
-        )
-    endif()
+    target_link_directories(tic80_n3ds PRIVATE ${DEVKITPRO}/libctru/lib ${DEVKITPRO}/portlibs/3ds/lib)
+    target_link_libraries(tic80_n3ds tic80studio png citro3d)
 
     add_custom_command(TARGET tic80_n3ds
            POST_BUILD
@@ -960,6 +911,10 @@ elseif (LINUX)
     set(CPACK_DEBIAN_PACKAGE_VERSION ${PROJECT_VERSION})
     set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Nesbox <grigoruk@gmail.com>")
     set(CPACK_DEBIAN_PACKAGE_SECTION "education")
+
+    if(RPI)
+        set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE armhf)
+    endif()
 
     install(CODE "set(CMAKE_INSTALL_LOCAL_ONLY true)")
     include(CPack)

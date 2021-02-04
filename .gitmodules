@@ -3,13 +3,14 @@
 	url = https://github.com/nesbox/blip-buf.git
 [submodule "vendor/curl"]
 	path = vendor/curl
-	url = https://github.com/nesbox/curl.git
+	url = https://github.com/curl/curl.git
 [submodule "vendor/dirent"]
 	path = vendor/dirent
 	url = https://github.com/tronkko/dirent.git
 [submodule "vendor/duktape"]
 	path = vendor/duktape
 	url = https://github.com/svaarala/duktape-releases.git
+	shallow = true
 [submodule "vendor/giflib"]
 	path = vendor/giflib
 	url = https://github.com/nesbox/giflib.git
@@ -40,3 +41,18 @@
 [submodule "vendor/zip"]
 	path = vendor/zip
 	url = https://github.com/kuba--/zip.git
+[submodule "vendor/moonscript"]
+	path = vendor/moonscript
+	url = https://github.com/nesbox/moonscript.git
+[submodule "vendor/argparse"]
+	path = vendor/argparse
+	url = https://github.com/cofyc/argparse.git
+[submodule "vendor/circle-stdlib"]
+	path = vendor/circle-stdlib
+	url = https://github.com/smuehlst/circle-stdlib.git
+[submodule "vendor/libuv"]
+	path = vendor/libuv
+	url = https://github.com/libuv/libuv.git
+[submodule "vendor/http-parser"]
+	path = vendor/http-parser
+	url = https://github.com/nodejs/http-parser.git

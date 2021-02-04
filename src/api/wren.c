@@ -370,10 +370,17 @@ static void wren_mouse(WrenVM* vm)
 
     wrenEnsureSlots(vm, 6);
     wrenSetSlotNewList(vm, 0);
-    wrenSetSlotDouble(vm, 1, mouse->x);
-    wrenInsertInList(vm, 0, 0, 1);
-    wrenSetSlotDouble(vm, 1, mouse->y);
-    wrenInsertInList(vm, 0, 1, 1);
+
+    {
+        tic_point pos = tic_api_mouse((tic_mem*)core);
+
+        wrenSetSlotDouble(vm, 1, pos.x);
+        wrenInsertInList(vm, 0, 0, 1);
+
+        wrenSetSlotDouble(vm, 1, pos.y);
+        wrenInsertInList(vm, 0, 1, 1);
+    }
+
     wrenSetSlotBool(vm, 1, mouse->left ? true : false);
     wrenInsertInList(vm, 0, 2, 1);
     wrenSetSlotBool(vm, 1, mouse->middle ? true : false);
@@ -993,7 +1000,7 @@ static void wren_sfx(WrenVM* vm)
         s32 octave = -1;
         s32 duration = -1;
         s32 channel = 0;
-        s32 volume = MAX_VOLUME;
+        s32 volumes[TIC_STEREO_CHANNELS] = {MAX_VOLUME, MAX_VOLUME};
         s32 speed = SFX_DEF_SPEED;
 
         if (index >= 0)
@@ -1034,7 +1041,16 @@ static void wren_sfx(WrenVM* vm)
 
                     if(top > 5)
                     {
-                        volume = getWrenNumber(vm, 5);
+                        if(isList(vm, 5) && wrenGetListCount(vm, 5) == COUNT_OF(volumes))
+                        {
+                            for(s32 i = 0; i < COUNT_OF(volumes); i++)
+                            {
+                                wrenGetListElement(vm, 5, i, top);
+                                if(isNumber(vm, top))
+                                    volumes[i] = getWrenNumber(vm, top);                                
+                            }
+                        }
+                        else volumes[0] = volumes[1] = getWrenNumber(vm, 5);
 
                         if(top > 6)
                         {
@@ -1047,7 +1063,7 @@ static void wren_sfx(WrenVM* vm)
 
         if (channel >= 0 && channel < TIC_SOUND_CHANNELS)
         {
-            tic_api_sfx(tic, index, note, octave, duration, channel, volume & 0xf, speed);
+            tic_api_sfx(tic, index, note, octave, duration, channel, volumes[0] & 0xf, volumes[1] & 0xf, speed);
         }       
         else wrenError(vm, "unknown channel\n");
     }
@@ -1347,7 +1363,7 @@ static void reportError(WrenVM* vm, WrenErrorType type, const char* module, int 
 static void writeFn(WrenVM* vm, const char* text) 
 {
     tic_core* core = getWrenCore(vm);
-    u8 color = tic_color_8;
+    u8 color = tic_color_dark_blue;
     core->data->trace(core->data->data, text ? text : "null", color);
 }
 

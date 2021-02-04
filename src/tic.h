@@ -36,6 +36,10 @@
 #define TIC_SPRITESIZE 8
 
 #define TIC_DEFAULT_BIT_DEPTH 4
+#define TIC_DEFAULT_BLIT_MODE 2
+
+#define TIC80_OFFSET_LEFT ((TIC80_FULLWIDTH-TIC80_WIDTH)/2)
+#define TIC80_OFFSET_TOP ((TIC80_FULLHEIGHT-TIC80_HEIGHT)/2)
 
 #define BITS_IN_BYTE 8
 #define TIC_BANK_SPRITES (1 << BITS_IN_BYTE)
@@ -44,6 +48,7 @@
 #define TIC_SPRITES (TIC_BANK_SPRITES * TIC_SPRITE_BANKS)
 
 #define TIC_SPRITESHEET_SIZE 128
+#define TIC_SPRITESHEET_COLS (TIC_SPRITESHEET_SIZE / TIC_SPRITESIZE)
 
 #define TIC_MAP_ROWS (TIC_SPRITESIZE)
 #define TIC_MAP_COLS (TIC_SPRITESIZE)
@@ -110,22 +115,22 @@ enum
 
 typedef enum
 {
-    tic_color_0,
-    tic_color_1,
-    tic_color_2,
-    tic_color_3,
-    tic_color_4,
-    tic_color_5,
-    tic_color_6,
-    tic_color_7,
-    tic_color_8,
-    tic_color_9,
-    tic_color_10,
-    tic_color_11,
-    tic_color_12,
-    tic_color_13,
-    tic_color_14,
-    tic_color_15,
+    tic_color_black,
+    tic_color_purple,
+    tic_color_red,
+    tic_color_orange,
+    tic_color_yellow,
+    tic_color_light_green,
+    tic_color_green,
+    tic_color_dark_green,
+    tic_color_dark_blue,
+    tic_color_blue,
+    tic_color_light_blue,
+    tic_color_cyan,
+    tic_color_white,
+    tic_color_light_grey,
+    tic_color_grey,
+    tic_color_dark_grey,
 } tic_color;
 
 typedef enum
@@ -403,18 +408,19 @@ typedef struct
 
 typedef struct
 {
-    tic_tiles   tiles;
-    tic_tiles   sprites;
-    tic_map     map;
-    tic_sfx     sfx;
-    tic_music   music;
-    tic_flags   flags;
+    tic_palette scn;
+    tic_palette ovr;
+} tic_palettes;
 
-    struct
-    {
-        tic_palette scn;
-        tic_palette ovr;
-    } palette;
+typedef struct
+{
+    tic_tiles       tiles;
+    tic_tiles       sprites;
+    tic_map         map;
+    tic_sfx         sfx;
+    tic_music       music;
+    tic_flags       flags;
+    tic_palettes    palette;
 
 } tic_bank;
 

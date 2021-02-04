@@ -32,8 +32,10 @@
 #include "api.h"
 #include "defines.h"
 #include "tools.h"
-#include "ext/file_dialog.h"
 #include "system.h"
+
+#define KEYBOARD_HOLD 20
+#define KEYBOARD_PERIOD 3
 
 #define TIC_LOCAL ".local/"
 #define TIC_LOCAL_VERSION TIC_LOCAL TIC_VERSION_LABEL "/"
@@ -45,7 +47,7 @@
 #define STUDIO_TEXT_BUFFER_WIDTH (TIC80_WIDTH / STUDIO_TEXT_WIDTH)
 #define STUDIO_TEXT_BUFFER_HEIGHT (TIC80_HEIGHT / STUDIO_TEXT_HEIGHT)
 
-#define TIC_COLOR_BG tic_color_0
+#define TIC_COLOR_BG tic_color_black
 #define DEFAULT_CHMOD 0755
 
 #define CONFIG_TIC "config.tic"
@@ -59,12 +61,26 @@
 #define CART_EXT ".tic"
 
 #define SHOW_TOOLTIP(FORMAT, ...)           \
-{                                           \
+do{                                         \
     static const char Format[] = FORMAT;    \
     static char buf[sizeof Format];         \
     sprintf(buf, Format, __VA_ARGS__);      \
     showTooltip(buf);                       \
-}
+}while(0)
+
+typedef struct
+{
+    bool skip;
+    bool nosound;
+    bool fullscreen;
+    s32 scale;
+    const char *fs;
+    const char *cart;
+#if defined(CRT_SHADER_SUPPORT)
+    bool crt;
+#endif
+    const char *cmd;
+} StartArgs;
 
 typedef enum
 {
@@ -82,20 +98,8 @@ typedef enum
     TIC_SURF_MODE,
 } EditorMode;
 
-typedef struct
-{
-    s32 x, y;
-} tic_point;
-
-typedef struct
-{
-    s32 x, y, w, h;
-} tic_rect;
-
 void setCursor(tic_cursor id);
 
-s32 getMouseX();
-s32 getMouseY();
 bool checkMousePos(const tic_rect* rect);
 bool checkMouseClick(const tic_rect* rect, tic_mouse_btn button);
 bool checkMouseDown(const tic_rect* rect, tic_mouse_btn button);
@@ -173,13 +177,16 @@ bool keyWasPressed(tic_key key);
 bool anyKeyWasPressed();
 
 const StudioConfig* getConfig();
-System* getSystem();
 
 const char* md5str(const void* data, s32 length);
 bool hasProjectExt(const char* name);
 void sfx_stop(tic_mem* tic, s32 channel);
-const char* studioExportMusic(s32 track);
-const char* studioExportSfx(s32 sfx);
+const char* studioExportMusic(s32 track, const char* filename);
+const char* studioExportSfx(s32 sfx, const char* filename);
 s32 calcWaveAnimation(tic_mem* tic, u32 index, s32 channel);
 void map2ram(tic_ram* ram, const tic_map* src);
 void tiles2ram(tic_ram* ram, const tic_tiles* src);
+
+#if defined(CRT_SHADER_SUPPORT)
+void switchCrtMonitor();
+#endif

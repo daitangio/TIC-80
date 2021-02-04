@@ -27,8 +27,9 @@
 
 static void drawGrid(World* world)
 {
+    tic_mem* tic = world->tic;
     Map* map = world->map;
-    u8 color = tic_color_14;
+    u8 color = tic_color_grey;
 
     for(s32 c = 0; c < TIC80_WIDTH; c += TIC_MAP_SCREEN_WIDTH)
         tic_api_line(world->tic, c, 0, c, TIC80_HEIGHT, color);
@@ -44,8 +45,8 @@ static void drawGrid(World* world)
     {
         setCursor(tic_cursor_hand);
 
-        s32 mx = getMouseX();
-        s32 my = getMouseY();
+        s32 mx = tic_api_mouse(tic).x;
+        s32 my = tic_api_mouse(tic).y;
 
         if(checkMouseDown(&rect, tic_mouse_left))
         {
@@ -64,16 +65,16 @@ static void drawGrid(World* world)
     s32 x = map->scroll.x / TIC_SPRITESIZE;
     s32 y = map->scroll.y / TIC_SPRITESIZE;
 
-    tic_api_rectb(world->tic, x, y, TIC_MAP_SCREEN_WIDTH+1, TIC_MAP_SCREEN_HEIGHT+1, tic_color_2);
+    tic_api_rectb(world->tic, x, y, TIC_MAP_SCREEN_WIDTH+1, TIC_MAP_SCREEN_HEIGHT+1, tic_color_red);
 
     if(x >= TIC_MAP_WIDTH - TIC_MAP_SCREEN_WIDTH)
-        tic_api_rectb(world->tic, x - TIC_MAP_WIDTH, y, TIC_MAP_SCREEN_WIDTH+1, TIC_MAP_SCREEN_HEIGHT+1, tic_color_2);
+        tic_api_rectb(world->tic, x - TIC_MAP_WIDTH, y, TIC_MAP_SCREEN_WIDTH+1, TIC_MAP_SCREEN_HEIGHT+1, tic_color_red);
 
     if(y >= TIC_MAP_HEIGHT - TIC_MAP_SCREEN_HEIGHT)
-        tic_api_rectb(world->tic, x, y - TIC_MAP_HEIGHT, TIC_MAP_SCREEN_WIDTH+1, TIC_MAP_SCREEN_HEIGHT+1, tic_color_2);
+        tic_api_rectb(world->tic, x, y - TIC_MAP_HEIGHT, TIC_MAP_SCREEN_WIDTH+1, TIC_MAP_SCREEN_HEIGHT+1, tic_color_red);
 
     if(x >= TIC_MAP_WIDTH - TIC_MAP_SCREEN_WIDTH && y >= TIC_MAP_HEIGHT - TIC_MAP_SCREEN_HEIGHT)
-        tic_api_rectb(world->tic, x - TIC_MAP_WIDTH, y - TIC_MAP_HEIGHT, TIC_MAP_SCREEN_WIDTH+1, TIC_MAP_SCREEN_HEIGHT+1, tic_color_2);
+        tic_api_rectb(world->tic, x - TIC_MAP_WIDTH, y - TIC_MAP_HEIGHT, TIC_MAP_SCREEN_WIDTH+1, TIC_MAP_SCREEN_HEIGHT+1, tic_color_red);
 }
 
 static void tick(World* world)

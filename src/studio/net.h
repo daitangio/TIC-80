@@ -1,6 +1,6 @@
 // MIT License
 
-// Copyright (c) 2020 Adrian "asie" Siekierka
+// Copyright (c) 2017 Vadim Grigoruk @nesbox // grigoruk@gmail.com
 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,16 +22,49 @@
 
 #pragma once
 
-#include "tic.h"
-#include "api.h"
+#include "tic80_types.h"
 
-#include <3ds.h>
+typedef struct tic_net tic_net;
 
-typedef struct {
-	LightLock *tick_lock;
-} tic_n3ds_net;
+typedef struct
+{
+    enum
+    {
+        net_get_progress,
+        net_get_done,
+        net_get_error,
+    } type;
 
-void n3ds_net_init(tic_n3ds_net *net, LightLock *tick_lock);
-void n3ds_net_free(tic_n3ds_net *net);
-void n3ds_net_get(tic_n3ds_net *net, const char *url, HttpGetCallback callback, void *calldata);
-void* n3ds_net_get_sync(tic_n3ds_net *net, const char *url, s32 *size);
+    union
+    {
+        struct
+        {
+            s32 size;
+            s32 total;
+        } progress;
+
+        struct
+        {
+            s32 size;
+            u8* data;
+        } done;
+
+        struct
+        {
+            s32 code;
+        } error;
+    };
+
+    void* calldata;
+    const char* url;
+
+} net_get_data;
+
+typedef void(*net_get_callback)(const net_get_data*);
+
+tic_net* tic_net_create(const char* host);
+
+void tic_net_get(tic_net* net, const char* url, net_get_callback callback, void* calldata);
+void tic_net_close(tic_net* net);
+void tic_net_start(tic_net *net);
+void tic_net_end(tic_net *net);

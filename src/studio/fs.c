@@ -22,7 +22,15 @@
 
 #include "studio.h"
 #include "fs.h"
-#include "ext/file_dialog.h"
+#include "net.h"
+
+#if defined(BAREMETALPI) || defined(_3DS)
+  #ifdef EN_DEBUG
+    #define dbg(...) printf(__VA_ARGS__)
+  #else
+    #define dbg(...)
+  #endif
+#endif
 
 #if defined(BAREMETALPI)
 #include "../../circle-stdlib/libs/circle/addon/fatfs/ff.h"
@@ -36,7 +44,7 @@
 #include <lauxlib.h>
 #include <lualib.h>
 
-#if defined(__TIC_WINRT__) || defined(__TIC_WINDOWS__)
+#if defined(__TIC_WINDOWS__)
 #include <direct.h>
 #include <windows.h>
 #else
@@ -47,20 +55,13 @@
 #include <emscripten.h>
 #endif
 
-#define PUBLIC_DIR TIC_HOST "/play"
-#define PUBLIC_DIR_SLASH PUBLIC_DIR "/"
+static const char* PublicDir = TIC_HOST;
 
-
-//define dbg(...) printf(__VA_ARGS__)
-#define dbg(...)
-
-
-static const char* PublicDir = PUBLIC_DIR;
-
-struct FileSystem
+struct tic_fs
 {
     char dir[TICNAME_MAX];
     char work[TICNAME_MAX];
+    tic_net* net;
 };
 
 #if defined(__EMSCRIPTEN__)
@@ -70,9 +71,9 @@ void syncfs()
 }
 #endif 
 
-const char* fsGetRootFilePath(FileSystem* fs, const char* name)
+const char* tic_fs_pathroot(tic_fs* fs, const char* name)
 {
-    static char path[TICNAME_MAX] = {0};
+    static char path[TICNAME_MAX];
 
     sprintf(path, "%s%s", fs->dir, name);
 
@@ -88,55 +89,57 @@ const char* fsGetRootFilePath(FileSystem* fs, const char* name)
     return path;
 }
 
-const char* fsGetFilePath(FileSystem* fs, const char* name)
+const char* tic_fs_path(tic_fs* fs, const char* name)
 {
-    static char path[TICNAME_MAX] = {0};
+    static char path[TICNAME_MAX];
 
-    if(strlen(fs->work))
+    if(*name == '/')
+        strcpy(path, name + 1);
+    else if(strlen(fs->work))
         sprintf(path, "%s/%s", fs->work, name);
     else 
         strcpy(path, name);
 
-    return fsGetRootFilePath(fs, path);
+    return tic_fs_pathroot(fs, path);
 }
 
-static bool isRoot(FileSystem* fs)
+static bool isRoot(tic_fs* fs)
 {
     return fs->work[0] == '\0';
 }
 
-static bool isPublicRoot(FileSystem* fs)
+static bool isPublicRoot(tic_fs* fs)
 {
     return strcmp(fs->work, PublicDir) == 0;
 }
 
-static bool isPublic(FileSystem* fs)
+static bool isPublic(tic_fs* fs)
 {
-    return strcmp(fs->work, PublicDir) == 0 || memcmp(fs->work, PUBLIC_DIR_SLASH, sizeof PUBLIC_DIR_SLASH - 1) == 0;
+    return memcmp(fs->work, PublicDir, sizeof PublicDir - 1) == 0;
 }
 
-bool fsIsInPublicDir(FileSystem* fs)
+bool tic_fs_ispubdir(tic_fs* fs)
 {
     return isPublic(fs);
 }
 
-#if defined(__TIC_WINDOWS__) || defined(__TIC_WINRT__)
+#if defined(__TIC_WINDOWS__)
 
-typedef wchar_t fsString;
+typedef wchar_t FsString;
 
 #define __S(x) L ## x 
 #define _S(x) __S(x)
 
-static const fsString* utf8ToString(const char* str)
+static const FsString* utf8ToString(const char* str)
 {
-    fsString* wstr = malloc(TICNAME_MAX * sizeof(fsString));
+    FsString* wstr = malloc(TICNAME_MAX * sizeof(FsString));
 
     MultiByteToWideChar(CP_UTF8, 0, str, TICNAME_MAX, wstr, TICNAME_MAX);
 
     return wstr;
 }
 
-static const char* stringToUtf8(const fsString* wstr)
+static const char* stringToUtf8(const FsString* wstr)
 {
     char* str = malloc(TICNAME_MAX * sizeof(char));
 
@@ -165,7 +168,7 @@ static const char* stringToUtf8(const fsString* wstr)
 
 #else
 
-typedef char fsString;
+typedef char FsString;
 
 #define _S(x) (x)
 
@@ -193,7 +196,8 @@ typedef char fsString;
 
 typedef struct
 {
-    ListCallback callback;
+    fs_list_callback item;
+    fs_done_callback done;
     void* data;
 } NetDirData;
 
@@ -220,32 +224,31 @@ static lua_State* netLuaInit(u8* buffer, s32 size)
     return NULL;
 }
 
-static void onDirResponse(u8* buffer, s32 size, void* data)
+static void onDirResponse(const net_get_data* netData)
 {
-    NetDirData* netDirData = (NetDirData*)data;
+    NetDirData* netDirData = (NetDirData*)netData->calldata;
 
-    if(buffer && size)
+    if(netData->type == net_get_done)
     {
-        lua_State* lua = netLuaInit(buffer, size);
-        free(buffer);
+        lua_State* lua = netLuaInit(netData->done.data, netData->done.size);
 
-        if(lua)
+        if (lua)
         {
             {
                 lua_getglobal(lua, "folders");
 
-                if(lua_type(lua, -1) == LUA_TTABLE)
+                if (lua_type(lua, -1) == LUA_TTABLE)
                 {
                     s32 count = (s32)lua_rawlen(lua, -1);
 
-                    for(s32 i = 1; i <= count; i++)
+                    for (s32 i = 1; i <= count; i++)
                     {
                         lua_geti(lua, -1, i);
 
                         {
                             lua_getfield(lua, -1, "name");
-                            if(lua_isstring(lua, -1))
-                                netDirData->callback(lua_tostring(lua, -1), NULL, 0, netDirData->data, true);
+                            if (lua_isstring(lua, -1))
+                                netDirData->item(lua_tostring(lua, -1), NULL, 0, netDirData->data, true);
 
                             lua_pop(lua, 1);
                         }
@@ -260,20 +263,20 @@ static void onDirResponse(u8* buffer, s32 size, void* data)
             {
                 lua_getglobal(lua, "files");
 
-                if(lua_type(lua, -1) == LUA_TTABLE)
+                if (lua_type(lua, -1) == LUA_TTABLE)
                 {
                     s32 count = (s32)lua_rawlen(lua, -1);
 
-                    for(s32 i = 1; i <= count; i++)
+                    for (s32 i = 1; i <= count; i++)
                     {
                         lua_geti(lua, -1, i);
 
-                        char hash[TICNAME_MAX] = {0};
-                        char name[TICNAME_MAX] = {0};
+                        char hash[TICNAME_MAX];
+                        char name[TICNAME_MAX];
 
                         {
                             lua_getfield(lua, -1, "hash");
-                            if(lua_isstring(lua, -1))
+                            if (lua_isstring(lua, -1))
                                 strcpy(hash, lua_tostring(lua, -1));
 
                             lua_pop(lua, 1);
@@ -282,7 +285,7 @@ static void onDirResponse(u8* buffer, s32 size, void* data)
                         {
                             lua_getfield(lua, -1, "name");
 
-                            if(lua_isstring(lua, -1))
+                            if (lua_isstring(lua, -1))
                                 strcpy(name, lua_tostring(lua, -1));
 
                             lua_pop(lua, 1);
@@ -291,8 +294,8 @@ static void onDirResponse(u8* buffer, s32 size, void* data)
                         {
                             lua_getfield(lua, -1, "id");
 
-                            if(lua_isinteger(lua, -1))
-                                netDirData->callback(name, hash, (s32)lua_tointeger(lua, -1), netDirData->data, false);
+                            if (lua_isinteger(lua, -1))
+                                netDirData->item(name, hash, (s32)lua_tointeger(lua, -1), netDirData->data, false);
 
                             lua_pop(lua, 1);
                         }
@@ -307,21 +310,18 @@ static void onDirResponse(u8* buffer, s32 size, void* data)
             lua_close(lua);
         }
     }
+
+    switch (netData->type)
+    {
+    case net_get_done:
+    case net_get_error:
+        netDirData->done(netDirData->data);
+        free(netDirData);
+        break;
+    }
 }
 
-static void netDirRequest(const char* path, ListCallback callback, void* data)
-{
-    char request[TICNAME_MAX] = {'\0'};
-    sprintf(request, "/api?fn=dir&path=%s", path);
-
-    s32 size = 0;
-    void* buffer = getSystem()->httpGetSync(request, &size);
-
-    NetDirData netDirData = {callback, data};
-    onDirResponse(buffer, size, &netDirData);
-}
-
-static void enumFiles(FileSystem* fs, const char* path, ListCallback callback, void* data, bool folder)
+static void enumFiles(tic_fs* fs, const char* path, fs_list_callback callback, void* data, bool folder)
 {
 #if defined(BAREMETALPI)
     dbg("enumFiles %s", path);
@@ -334,7 +334,7 @@ static void enumFiles(FileSystem* fs, const char* path, ListCallback callback, v
         return;
     }
 
-    static char path2[TICNAME_MAX] = {0};
+    static char path2[TICNAME_MAX];
     strcpy(path2, path);
 
     if (path2[strlen(path2) - 1] == '/')    // one character
@@ -369,11 +369,11 @@ static void enumFiles(FileSystem* fs, const char* path, ListCallback callback, v
     TIC_DIR *dir = NULL;
     struct tic_dirent* ent = NULL;
 
-    const fsString* pathString = utf8ToString(path);
+    const FsString* pathString = utf8ToString(path);
 
     if ((dir = tic_opendir(pathString)) != NULL)
     {
-        fsString fullPath[TICNAME_MAX];
+        FsString fullPath[TICNAME_MAX];
         struct tic_stat_struct s;
         
         while ((ent = tic_readdir(dir)) != NULL)
@@ -401,38 +401,49 @@ static void enumFiles(FileSystem* fs, const char* path, ListCallback callback, v
 #endif
 }
 
-void fsEnumFiles(FileSystem* fs, ListCallback callback, void* data)
+void tic_fs_enum(tic_fs* fs, fs_list_callback onItem, fs_done_callback onDone, void* data)
 {
-    if(isRoot(fs) && !callback(PublicDir, NULL, 0, data, true))return;
-
-    if(isPublic(fs))
+    if (isRoot(fs) && !onItem(PublicDir, NULL, 0, data, true))
     {
-        netDirRequest(fs->work + sizeof(TIC_HOST), callback, data);
+        onDone(data);
         return;
     }
 
-    const char* path = fsGetFilePath(fs, "");
+    if(isPublic(fs))
+    {
+        char request[TICNAME_MAX];
+        sprintf(request, "/api?fn=dir&path=%s", fs->work + sizeof(TIC_HOST));
 
-    enumFiles(fs, path, callback, data, true);
-    enumFiles(fs, path, callback, data, false);
+        NetDirData netDirData = { onItem, onDone, data };
+        tic_net_get(fs->net, request, onDirResponse, OBJCOPY(netDirData));
+
+        return;
+    }
+
+    const char* path = tic_fs_path(fs, "");
+
+    enumFiles(fs, path, onItem, data, true);
+    enumFiles(fs, path, onItem, data, false);
+
+    onDone(data);
 }
 
-bool fsDeleteDir(FileSystem* fs, const char* name)
+bool tic_fs_deldir(tic_fs* fs, const char* name)
 {
 #if defined(BAREMETALPI)
     // TODO BAREMETALPI
-    dbg("fsDeleteDir %s", name);
+    dbg("tic_fs_deldir %s", name);
     return 0;
 #else
-#if defined(__TIC_WINRT__) || defined(__TIC_WINDOWS__)
-    const char* path = fsGetFilePath(fs, name);
+#if defined(__TIC_WINDOWS__)
+    const char* path = tic_fs_path(fs, name);
 
-    const fsString* pathString = utf8ToString(path);
+    const FsString* pathString = utf8ToString(path);
     bool result = tic_rmdir(pathString);
     freeString(pathString);
 
 #else
-    bool result = rmdir(fsGetFilePath(fs, name));
+    bool result = rmdir(tic_fs_path(fs, name));
 #endif
 
 #if defined(__EMSCRIPTEN__)
@@ -443,16 +454,16 @@ bool fsDeleteDir(FileSystem* fs, const char* name)
 #endif
 }
 
-bool fsDeleteFile(FileSystem* fs, const char* name)
+bool tic_fs_delfile(tic_fs* fs, const char* name)
 {
 #if defined(BAREMETALPI)
-    dbg("fsDeleteFile %s", name);
+    dbg("tic_fs_delfile %s", name);
     // TODO BAREMETALPI
     return false;
 #else
-    const char* path = fsGetFilePath(fs, name);
+    const char* path = tic_fs_path(fs, name);
 
-    const fsString* pathString = utf8ToString(path);
+    const FsString* pathString = utf8ToString(path);
     bool result = tic_remove(pathString);
     freeString(pathString);
 
@@ -464,166 +475,45 @@ bool fsDeleteFile(FileSystem* fs, const char* name)
 #endif
 }
 
-typedef struct
-{
-    FileSystem* fs;
-    AddCallback callback;
-    void* data;
-} AddFileData;
-
-static void onAddFile(const char* name, const u8* buffer, s32 size, void* data, u32 mode)
-{
-#if defined(BAREMETALPI)
-    dbg("onAddFile %s", name);
-    // TODO BAREMETALPI
-#else
-    AddFileData* addFileData = (AddFileData*)data;
-    FileSystem* fs = addFileData->fs;
-
-    if(name)
-    {
-        const char* destname = fsGetFilePath(fs, name);
-
-        const fsString* destString = utf8ToString(destname);
-        FILE* file = tic_fopen(destString, _S("rb"));
-        freeString(destString);
-
-        if(file)
-        {
-            fclose(file);
-
-            addFileData->callback(name, FS_FILE_EXISTS, addFileData->data);
-        }
-        else
-        {
-            const char* path = fsGetFilePath(fs, name);
-
-            const fsString* pathString = utf8ToString(path);
-            FILE* dest = tic_fopen(pathString, _S("wb"));
-            freeString(pathString);
-
-            if (dest)
-            {
-                fwrite(buffer, 1, size, dest);
-                fclose(dest);
-
-#if !defined(__TIC_WINRT__) && !defined(__TIC_WINDOWS__) && !defined(_3DS)
-                if(mode)
-                    chmod(path, mode);
-#endif
-
-#if defined(__EMSCRIPTEN__)
-                syncfs();
-#endif
-                
-                addFileData->callback(name, FS_FILE_ADDED, addFileData->data);
-            }
-        }
-    }
-    else
-    {
-        addFileData->callback(name, FS_FILE_NOT_ADDED, addFileData->data);
-    }
-
-    free(addFileData);
-#endif
-}
-
-void fsAddFile(FileSystem* fs, AddCallback callback, void* data)
-{
-    AddFileData* addFileData = (AddFileData*)malloc(sizeof(AddFileData));
-
-    *addFileData = (AddFileData) { fs, callback, data };
-
-    getSystem()->fileDialogLoad(&onAddFile, addFileData);
-}
-
-typedef struct
-{
-    GetCallback callback;
-    void* data;
-    void* buffer;
-} GetFileData;
-
-static void onGetFile(bool result, void* data)
-{
-    GetFileData* command = (GetFileData*)data;
-
-    command->callback(result ? FS_FILE_DOWNLOADED : FS_FILE_NOT_DOWNLOADED, command->data);
-
-    free(command->buffer);
-    free(command);
-}
-
-static u32 fsGetMode(FileSystem* fs, const char* name)
-{
-#if defined(BAREMETALPI)
-    dbg("fsGetMode %s", name);
-    // TODO BAREMETALPI
-    return 0;
-#else
-
-#if defined(__TIC_WINRT__) || defined(__TIC_WINDOWS__)
-    return 0;
-#else
-    const char* path = fsGetFilePath(fs, name);
-    mode_t mode = 0;
-    struct stat s;
-    if(stat(path, &s) == 0)
-        mode = s.st_mode;
-
-    return mode;
-#endif
-
-#endif
-
-}
-
-void fsHomeDir(FileSystem* fs)
+void tic_fs_homedir(tic_fs* fs)
 {
     memset(fs->work, 0, sizeof fs->work);
 }
 
-void fsDirBack(FileSystem* fs)
+void tic_fs_dirback(tic_fs* fs)
 {
     if(isPublicRoot(fs))
     {
-        fsHomeDir(fs);
+        tic_fs_homedir(fs);
         return;
     }
 
     char* start = fs->work;
     char* ptr = start + strlen(fs->work);
 
-    while(ptr > start && *ptr != '/') ptr--;
-
-    *ptr = '\0';
+    while (ptr > start && *ptr != '/') ptr--;
+    while (*ptr) *ptr++ = '\0';
 }
 
-void fsGetDir(FileSystem* fs, char* dir)
+void tic_fs_dir(tic_fs* fs, char* dir)
 {
     strcpy(dir, fs->work);
 }
 
-bool fsChangeDir(FileSystem* fs, const char* dir)
+void tic_fs_changedir(tic_fs* fs, const char* dir)
 {
-    if(fsIsDir(fs, dir))
-    {
-        if(strlen(fs->work))
-            strcat(fs->work, "/");
+    if(strlen(fs->work))
+        strcat(fs->work, "/");
                 
-        strcat(fs->work, dir);
-
-        return true;
-    }
-
-    return false;
+    strcat(fs->work, dir);
 }
 
 typedef struct
 {
-    const char* name;
+    char* name;
     bool found;
+    fs_isdir_callback done;
+    void* data;
 
 } EnumPublicDirsData;
 
@@ -640,98 +530,54 @@ static bool onEnumPublicDirs(const char* name, const char* info, s32 id, void* d
     return true;
 }
 
-bool fsIsDir(FileSystem* fs, const char* name)
+static void onEnumPublicDirsDone(void* data)
 {
-    if(*name == '.') return false;
+    EnumPublicDirsData* enumPublicDirsData = data;
+    enumPublicDirsData->done(enumPublicDirsData->found, enumPublicDirsData->data);
+    free(enumPublicDirsData->name);
+    free(enumPublicDirsData);
+}
+
+bool tic_fs_isdir(tic_fs* fs, const char* name)
+{
+    if (*name == '.') return false;
+    if (isRoot(fs) && strcmp(name, PublicDir) == 0) return true;
+
 #if defined(BAREMETALPI)
-    dbg("fsIsDir %s\n", name);
+    dbg("fsIsDirSync %s\n", name);
     FILINFO s;
 
     FRESULT res = f_stat(name, &s);
-    if(res != FR_OK) return false;
-    
+    if (res != FR_OK) return false;
+
     return s.fattrib & AM_DIR;
 #else
-
-    if(isRoot(fs) && strcmp(name, PublicDir) == 0)
-        return true;
-
-    if(isPublicRoot(fs))
-    {
-        EnumPublicDirsData enumPublicDirsData =
-        {
-            .name = name,
-            .found = false,
-        };
-
-        fsEnumFiles(fs, onEnumPublicDirs, &enumPublicDirsData);
-
-        return enumPublicDirsData.found;
-    }
-
-    const char* path = fsGetFilePath(fs, name);
+    const char* path = tic_fs_path(fs, name);
     struct tic_stat_struct s;
-    const fsString* pathString = utf8ToString(path);
+    const FsString* pathString = utf8ToString(path);
     bool ret = tic_stat(pathString, &s) == 0 && S_ISDIR(s.st_mode);
     freeString(pathString);
 
     return ret;
 #endif
-
 }
 
-void fsGetFileData(GetCallback callback, const char* name, void* buffer, s32 size, u32 mode, void* data)
+void tic_fs_isdir_async(tic_fs* fs, const char* name, fs_isdir_callback callback, void* data)
 {
-    GetFileData* command = (GetFileData*)malloc(sizeof(GetFileData));
-    *command = (GetFileData) {callback, data, buffer};
-
-    getSystem()->fileDialogSave(onGetFile, name, buffer, size, command, mode);
-}
-
-typedef struct
-{
-    OpenCallback callback;
-    void* data;
-} OpenFileData;
-
-static void onOpenFileData(const char* name, const u8* buffer, s32 size, void* data, u32 mode)
-{
-    OpenFileData* command = (OpenFileData*)data;
-
-    command->callback(name, buffer, size, command->data);
-
-    free(command);
-}
-
-void fsOpenFileData(OpenCallback callback, void* data)
-{
-    OpenFileData* command = (OpenFileData*)malloc(sizeof(OpenFileData));
-
-    *command = (OpenFileData){callback, data};
-
-    getSystem()->fileDialogLoad(onOpenFileData, command);
-}
-
-void fsGetFile(FileSystem* fs, GetCallback callback, const char* name, void* data)
-{
-    s32 size = 0;
-    void* buffer = fsLoadFile(fs, name, &size);
-
-    if(buffer)
+    if(isPublicRoot(fs))
     {
-        GetFileData* command = (GetFileData*)malloc(sizeof(GetFileData));
-        *command = (GetFileData) {callback, data, buffer};
-
-        s32 mode = fsGetMode(fs, name);
-        getSystem()->fileDialogSave(onGetFile, name, buffer, size, command, mode);
+        EnumPublicDirsData enumPublicDirsData = { strdup(name), false, callback, data};
+        tic_fs_enum(fs, onEnumPublicDirs, onEnumPublicDirsDone, OBJCOPY(enumPublicDirsData));
+        return;
     }
-    else callback(FS_FILE_NOT_DOWNLOADED, data);
+
+    callback(tic_fs_isdir(fs, name), data);
 }
 
-bool fsWriteFile(const char* name, const void* buffer, s32 size)
+bool fs_write(const char* name, const void* buffer, s32 size)
 {
 #if defined(BAREMETALPI)
-    dbg("fsWriteFile %s\n", name);
+    dbg("fs_write %s\n", name);
     FIL File;
     FRESULT res = f_open (&File, name, FA_WRITE | FA_CREATE_ALWAYS);
     if (res != FR_OK)
@@ -755,7 +601,7 @@ bool fsWriteFile(const char* name, const void* buffer, s32 size)
     }
     return true;
 #else
-    const fsString* pathString = utf8ToString(name);
+    const FsString* pathString = utf8ToString(name);
     FILE* file = tic_fopen(pathString, _S("wb"));
     freeString(pathString);
 
@@ -775,67 +621,17 @@ bool fsWriteFile(const char* name, const void* buffer, s32 size)
 #endif
 }
 
-bool fsCopyFile(const char* src, const char* dst)
+void* fs_read(const char* path, s32* size)
 {
 #if defined(BAREMETALPI)
-    // TODO BAREMETALPI
-    return false;
-#else
-    bool done = false;
-
-    void* buffer = NULL;
-    s32 size = 0;
-
-    {
-        const fsString* pathString = utf8ToString(src);
-        FILE* file = tic_fopen(pathString, _S("rb"));
-        freeString(pathString);
-
-        if(file)
-        {
-            fseek(file, 0, SEEK_END);
-            size = ftell(file);
-            fseek(file, 0, SEEK_SET);
-
-            if((buffer = malloc(size)) && fread(buffer, size, 1, file)) {}
-
-            fclose(file);
-        }       
-    }
-
-    if(buffer)
-    {
-        const fsString* pathString = utf8ToString(dst);
-        FILE* file = tic_fopen(pathString, _S("wb"));
-        freeString(pathString);
-
-        if(file)
-        {
-            fwrite(buffer, 1, size, file);
-            fclose(file);
-
-            done = true;
-        }
-
-        free(buffer);
-    }
-
-    return done;
-#endif
-
-}
-
-void* fsReadFile(const char* path, s32* size)
-{
-#if defined(BAREMETALPI)
-    dbg("fsReadFile %s\n", path);
+    dbg("fs_read %s\n", path);
     FILINFO fi;
     FRESULT res = f_stat(path, &fi);
     if(res!=FR_OK) return NULL;
     FIL file;
     res = f_open (&file, path, FA_READ | FA_OPEN_EXISTING);
     if(res!=FR_OK) return NULL;
-
+    *size = fi.fsize; // size is in output!
     void* buffer = malloc(*size);
     UINT read = 0;
     res = f_read(&file, buffer, fi.fsize, &read);
@@ -846,7 +642,7 @@ void* fsReadFile(const char* path, s32* size)
     return buffer;
 
 #else
-    const fsString* pathString = utf8ToString(path);
+    const FsString* pathString = utf8ToString(path);
     FILE* file = tic_fopen(pathString, _S("rb"));
     freeString(pathString);
 
@@ -869,132 +665,10 @@ void* fsReadFile(const char* path, s32* size)
 #endif
 }
 
-static void makeDir(const char* name)
+bool fs_exists(const char* name)
 {
 #if defined(BAREMETALPI)
-    // TODO BAREMETALPI
-    dbg("makeDir %s\n", name);
-
-    char* path = strdup(name);
-    if (path && *path) {                      // make sure result has at least
-      if (path[strlen(path) - 1] == '/')    // one character
-            path[strlen(path) - 1] = 0;
-    }
-
-    FRESULT res = f_mkdir(path);
-    if(res != FR_OK)
-    {
-        dbg("Could not mkdir %s\n", name);
-    }
-    free(path);
-#else
-    const fsString* pathString = utf8ToString(name);
-    tic_mkdir(pathString);
-    freeString(pathString);
-
-#if defined(__EMSCRIPTEN__)
-    syncfs();
-#endif
-#endif
-}
-
-static void fsFullname(const char *path, char *fullname)
-{
-#if defined(BAREMETALPI) || defined(_3DS)
-    dbg("fsFullname %s", path);
-    // TODO BAREMETALPI
-#else
-#if defined(__TIC_WINDOWS__) || defined(__TIC_WINRT__)
-    static wchar_t wpath[TICNAME_MAX];
-
-    const fsString* pathString = utf8ToString(path);
-    GetFullPathNameW(pathString, sizeof(wpath), wpath, NULL);
-    freeString(pathString);
-
-    const char* res = stringToUtf8(wpath);
-
-#else
-
-    const char* res = realpath(path, NULL);
-
-#endif
-
-    strcpy(fullname, res);
-    free((void*)res);
-#endif
-}
-
-void fsFilename(const char *path, char* out)
-{
-    char full[TICNAME_MAX];
-    fsFullname(path, full);
-
-    char base[TICNAME_MAX];
-    fsBasename(path, base);
-
-    strcpy(out, full + strlen(base));
-}
-
-void fsBasename(const char *path, char* out)
-{
-#if defined(BAREMETALPI)
-    // TODO BAREMETALPI
-    dbg("fsBasename %s\n", path);
-#else
-
-    char* result = NULL;
-
-#if defined(__TIC_WINDOWS__) || defined(__TIC_WINRT__)
-#define SEP "\\"
-#else
-#define SEP "/"
-#endif
-
-
-    char full[TICNAME_MAX];
-    fsFullname(path, full);
-
-    struct tic_stat_struct s;
-
-    const fsString* fullString = utf8ToString(full);
-    s32 ret = tic_stat(fullString, &s);
-    freeString(fullString);
-
-    if(ret == 0)
-    {
-        result = full;
-
-        if(S_ISREG(s.st_mode))
-        {
-            const char* ptr = result + strlen(result);
-
-            while(ptr >= result)
-            {
-                if(*ptr == SEP[0])
-                {
-                    result[ptr-result] = '\0';
-                    break;
-                }
-
-                ptr--;
-            }
-        }
-    }
-
-    if (result)
-    {
-        if (result[strlen(result) - 1] != SEP[0])
-            strcat(result, SEP);
-
-        strcpy(out, result);
-    }
-#endif
-}
-
-bool fsExists(const char* name)
-{
-#if defined(BAREMETALPI)
-    dbg("fsExists %s\n", name);
+    dbg("fs_exists %s\n", name);
     FILINFO s;
 
     FRESULT res = f_stat(name, &s);
@@ -1002,7 +676,7 @@ bool fsExists(const char* name)
 #else
     struct tic_stat_struct s;
 
-    const fsString* pathString = utf8ToString(name);
+    const FsString* pathString = utf8ToString(name);
     bool ret = tic_stat(pathString, &s) == 0;
     freeString(pathString);
 
@@ -1010,21 +684,21 @@ bool fsExists(const char* name)
 #endif
 }
 
-bool fsExistsFile(FileSystem* fs, const char* name)
+bool tic_fs_exists(tic_fs* fs, const char* name)
 {
-    return fsExists(fsGetFilePath(fs, name));
+    return fs_exists(tic_fs_path(fs, name));
 }
 
-u64 fsMDate(FileSystem* fs, const char* name)
+u64 fs_date(const char* path)
 {
 #if defined(BAREMETALPI)
-    dbg("fsMDate %s\n", name);
+    dbg("fs_date %s\n", path);
     // TODO BAREMETALPI
     return 0;
 #else
     struct tic_stat_struct s;
 
-    const fsString* pathString = utf8ToString(fsGetFilePath(fs, name));
+    const FsString* pathString = utf8ToString(path);
     s32 ret = tic_stat(pathString, &s);
     freeString(pathString);
 
@@ -1037,79 +711,91 @@ u64 fsMDate(FileSystem* fs, const char* name)
 #endif
 }
 
-bool fsSaveFile(FileSystem* fs, const char* name, const void* data, s32 size, bool overwrite)
+bool tic_fs_save(tic_fs* fs, const char* name, const void* data, s32 size, bool overwrite)
 {
     if(!overwrite)
     {
-        if(fsExistsFile(fs, name))
+        if(tic_fs_exists(fs, name))
             return false;
     }
 
-    return fsWriteFile(fsGetFilePath(fs, name), data, size);
+    return fs_write(tic_fs_path(fs, name), data, size);
 }
 
-bool fsSaveRootFile(FileSystem* fs, const char* name, const void* data, s32 size, bool overwrite)
+bool tic_fs_saveroot(tic_fs* fs, const char* name, const void* data, s32 size, bool overwrite)
 {
-    char path[TICNAME_MAX];
-    strcpy(path, fs->work);
-    fsHomeDir(fs);
+    const char* path = tic_fs_pathroot(fs, name);
 
-    bool ret = fsSaveFile(fs, name, data, size, overwrite);
+    if(!overwrite)
+    {
+        if(fs_exists(path))
+            return false;
+    }
 
-    strcpy(fs->work, path);
-
-    return ret;
+    return fs_write(path, data, size);
 }
 
 typedef struct
 {
-    const char* name;
-    char hash[TICNAME_MAX];
+    tic_fs* fs;
+    fs_load_callback done;
+    void* data;
+    char* cachePath;
+} LoadFileByHashData;
 
-} LoadPublicCartData;
-
-static bool onLoadPublicCart(const char* name, const char* info, s32 id, void* data, bool dir)
+static void fileByHashLoaded(const net_get_data* netData)
 {
-    LoadPublicCartData* loadPublicCartData = (LoadPublicCartData*)data;
+    LoadFileByHashData* loadFileByHashData = netData->calldata;
 
-    if(strcmp(name, loadPublicCartData->name) == 0 && info && strlen(info))
+    if (netData->type == net_get_done)
     {
-        strcpy(loadPublicCartData->hash, info);
-        return false;
+        tic_fs_saveroot(loadFileByHashData->fs, loadFileByHashData->cachePath, netData->done.data, netData->done.size, false);
+        loadFileByHashData->done(netData->done.data, netData->done.size, loadFileByHashData->data);
     }
 
-    return true;
+    switch (netData->type)
+    {
+    case net_get_done:
+    case net_get_error:
+
+        free(loadFileByHashData->cachePath);
+        free(loadFileByHashData);
+        break;
+    }
 }
 
-void* fsLoadFileByHash(FileSystem* fs, const char* hash, s32* size)
+void tic_fs_hashload(tic_fs* fs, const char* hash, fs_load_callback callback, void* data)
 {
 #if defined(BAREMETALPI)
     // TODO BAREMETALPI
     return NULL;
 #else
-    char cachePath[TICNAME_MAX] = {0};
+
+    char cachePath[TICNAME_MAX];
     sprintf(cachePath, TIC_CACHE "%s.tic", hash);
 
     {
-        void* data = fsLoadRootFile(fs, cachePath, size);
-        if(data) return data;
+        s32 size = 0;
+        void* buffer = tic_fs_loadroot(fs, cachePath, &size);
+        if (buffer)
+        {
+            callback(buffer, size, data);
+            return;
+        }
     }
 
-    char path[TICNAME_MAX] = {0};
+    char path[TICNAME_MAX];
     sprintf(path, "/cart/%s/cart.tic", hash);
-    void* data = getSystem()->httpGetSync(path, size);
 
-    if(data)
-        fsSaveRootFile(fs, cachePath, data, *size, false);
-
-    return data;
+    LoadFileByHashData loadFileByHashData = { fs, callback, data, strdup(cachePath) };
+    tic_net_get(fs->net, path, fileByHashLoaded, OBJCOPY(loadFileByHashData));
 #endif
 }
 
-void* fsLoadFile(FileSystem* fs, const char* name, s32* size)
+void* tic_fs_load(tic_fs* fs, const char* name, s32* size)
 {
 #if defined(BAREMETALPI)
-    dbg("fsLoadFile x %s\n", name);
+    dbg("tic_fs_load x %s\n", name);
     dbg("fs.dir %s\n", fs->dir);
     dbg("fs.work %s\n", fs->work);
     
@@ -1121,7 +807,7 @@ void* fsLoadFile(FileSystem* fs, const char* name, s32* size)
     else
     {
         dbg("non public \n");
-        const char* fp = fsGetFilePath(fs, name);
+        const char* fp = tic_fs_path(fs, name);
         dbg("loading: %s\n", fp);
 
 
@@ -1162,81 +848,91 @@ void* fsLoadFile(FileSystem* fs, const char* name, s32* size)
     }
     return NULL;
 #else
-    if(isPublic(fs))
+
+    const FsString* pathString = utf8ToString(tic_fs_path(fs, name));
+    FILE* file = tic_fopen(pathString, _S("rb"));
+    freeString(pathString);
+
+    void* ptr = NULL;
+
+    if(file)
     {
-        LoadPublicCartData loadPublicCartData = 
-        {
-            .name = name,
-            .hash = {0},
-        };
+        fseek(file, 0, SEEK_END);
+        *size = ftell(file);
+        fseek(file, 0, SEEK_SET);
 
-        fsEnumFiles(fs, onLoadPublicCart, &loadPublicCartData);
+        u8* buffer = malloc(*size);
 
-        if(strlen(loadPublicCartData.hash))
-            return fsLoadFileByHash(fs, loadPublicCartData.hash, size);
-    }
-    else
-    {
-        const fsString* pathString = utf8ToString(fsGetFilePath(fs, name));
-        FILE* file = tic_fopen(pathString, _S("rb"));
-        freeString(pathString);
+        if(buffer && fread(buffer, *size, 1, file)) ptr = buffer;
 
-        void* ptr = NULL;
-
-        if(file)
-        {
-            fseek(file, 0, SEEK_END);
-            *size = ftell(file);
-            fseek(file, 0, SEEK_SET);
-
-            u8* buffer = malloc(*size);
-
-            if(buffer && fread(buffer, *size, 1, file)) ptr = buffer;
-
-            fclose(file);
-        }
-
-        return ptr;     
+        fclose(file);
     }
 
-    return NULL;
+    return ptr;     
+
 #endif
 }
 
-void* fsLoadRootFile(FileSystem* fs, const char* name, s32* size)
+void* tic_fs_loadroot(tic_fs* fs, const char* name, s32* size)
 {
-    char path[TICNAME_MAX];
-    strcpy(path, fs->work);
-    fsHomeDir(fs);
-
-    void* ret = fsLoadFile(fs, name, size);
-
-    strcpy(fs->work, path);
-
-    return ret;
+    return fs_read(tic_fs_pathroot(fs, name), size);
 }
 
-void fsMakeDir(FileSystem* fs, const char* name)
+void tic_fs_makedir(tic_fs* fs, const char* name)
 {
-    makeDir(fsGetFilePath(fs, name));
+#if defined(BAREMETALPI)
+    // TODO BAREMETALPI
+    dbg("makeDir %s\n", name);
+
+    char* path = strdup(name);
+    if (path && *path) {                      // make sure result has at least
+      if (path[strlen(path) - 1] == '/')    // one character
+            path[strlen(path) - 1] = 0;
+    }
+
+    FRESULT res = f_mkdir(path);
+    if(res != FR_OK)
+    {
+        dbg("Could not mkdir %s\n", name);
+    }
+    free(path);
+#else
+    const FsString* pathString = utf8ToString(name);
+    tic_mkdir(pathString);
+    freeString(pathString);
+
+#if defined(__EMSCRIPTEN__)
+    syncfs();
+#endif
+#endif
 }
 
-void fsOpenWorkingFolder(FileSystem* fs)
+void tic_fs_openfolder(tic_fs* fs)
 {
-    const char* path = fsGetFilePath(fs, "");
+    const char* path = tic_fs_path(fs, "");
 
     if(isPublic(fs))
         path = fs->dir;
 
-    getSystem()->openSystemPath(path);
+    tic_sys_open_path(path);
 }
 
-FileSystem* createFileSystem(const char* path)
+#if defined(__TIC_WINDOWS__)
+#define SEP "\\"
+#else
+#define SEP "/"
+#endif
+
+tic_fs* tic_fs_create(const char* path, tic_net* net)
 {
-    FileSystem* fs = (FileSystem*)malloc(sizeof(FileSystem));
-    memset(fs, 0, sizeof(FileSystem));
+    tic_fs* fs = (tic_fs*)calloc(1, sizeof(tic_fs));
 
     strcpy(fs->dir, path);
+
+    if(path[strlen(path) - 1] != SEP[0])
+        strcat(fs->dir, SEP);
+
+    fs->net = net;
 
     return fs;
 }

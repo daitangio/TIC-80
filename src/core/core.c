@@ -159,6 +159,14 @@ void tic_api_exit(tic_mem* tic)
     core->data->exit(core->data->data);
 }
 
+static inline void sync(void* dst, void* src, s32 size, bool rev)
+{
+    if(rev)
+        SWAP(dst, src, void*);
+
+    memcpy(dst, src, size);
+}
+
 void tic_api_sync(tic_mem* tic, u32 mask, s32 bank, bool toCart)
 {
     tic_core* core = (tic_core*)tic;
@@ -183,21 +191,15 @@ void tic_api_sync(tic_mem* tic, u32 mask, s32 bank, bool toCart)
     assert(bank >= 0 && bank < TIC_BANKS);
 
     for (s32 i = 0; i < Count; i++)
-    {
-        if (mask & (1 << i))
-            toCart
-            ? memcpy((u8*)&tic->cart.banks[bank] + Sections[i].bank, (u8*)&tic->ram + Sections[i].ram, Sections[i].size)
-            : memcpy((u8*)&tic->ram + Sections[i].ram, (u8*)&tic->cart.banks[bank] + Sections[i].bank, Sections[i].size);
-    }
+        if(mask & (1 << i))
+            sync((u8*)&tic->ram + Sections[i].ram, (u8*)&tic->cart.banks[bank] + Sections[i].bank, Sections[i].size, toCart);
 
     // copy OVR palette
     {
         enum { PaletteIndex = 5 };
 
         if (mask & (1 << PaletteIndex))
-            toCart
-            ? memcpy(&tic->cart.banks[bank].palette.ovr, &core->state.ovr.palette, sizeof(tic_palette))
-            : memcpy(&core->state.ovr.palette, &tic->cart.banks[bank].palette.ovr, sizeof(tic_palette));
+            sync(&core->state.ovr.palette, &tic->cart.banks[bank].palette.ovr, sizeof(tic_palette), toCart);
     }
 
     core->state.synced |= mask;
@@ -206,7 +208,7 @@ void tic_api_sync(tic_mem* tic, u32 mask, s32 bank, bool toCart)
 double tic_api_time(tic_mem* memory)
 {
     tic_core* core = (tic_core*)memory;
-    return (double)((core->data->counter() - core->data->start) * 1000) / core->data->freq();
+    return (double)((core->data->counter(core->data->data) - core->data->start) * 1000) / core->data->freq(core->data->data);
 }
 
 s32 tic_api_tstamp(tic_mem* memory)
@@ -252,7 +254,7 @@ static void resetPalette(tic_mem* memory)
 
 static void resetBlitSegment(tic_mem* memory)
 {
-    memory->ram.vram.blit.segment = 2;
+    memory->ram.vram.blit.segment = TIC_DEFAULT_BLIT_MODE;
 }
 
 static const char* readMetatag(const char* code, const char* tag, const char* comment)
@@ -495,7 +497,7 @@ void tic_core_tick(tic_mem* tic, tic_tick_data* data)
                 tic->input.keyboard = 1;
             else tic->input.data = -1;  // default is all enabled
 
-            data->start = data->counter();
+            data->start = data->counter(core->data->data);
 
             done = config->init(tic, code);
         }
@@ -541,7 +543,7 @@ void tic_core_pause(tic_mem* memory)
     if (core->data)
     {
         core->pause.time.start = core->data->start;
-        core->pause.time.paused = core->data->counter();
+        core->pause.time.paused = core->data->counter(core->data->data);
     }
 }
 
@@ -554,7 +556,7 @@ void tic_core_resume(tic_mem* memory)
         memcpy(&core->state, &core->pause.state, sizeof(tic_core_state_data));
         memcpy(&memory->ram, &core->pause.ram, sizeof(tic_ram));
         memory->input.data = core->pause.input;
-        core->data->start = core->pause.time.start + core->data->counter() - core->pause.time.paused;
+        core->data->start = core->pause.time.start + core->data->counter(core->data->data) - core->pause.time.paused;
     }
 }
 

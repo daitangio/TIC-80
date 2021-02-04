@@ -18,7 +18,8 @@ To make a retro styled game, the whole process of creation and execution takes p
 - Multiple programming languages: [Lua](https://www.lua.org),
   [Moonscript](https://moonscript.org),
   [Javascript](https://developer.mozilla.org/en-US/docs/Web/JavaScript),
-  [Wren](http://wren.io/), and [Fennel](https://fennel-lang.org).
+  [Wren](http://wren.io/), [Fennel](https://fennel-lang.org), and
+  [Squirrel](http://www.squirrel-lang.org).
 - Games can have mouse and keyboard as input
 - Games can have up to 4 controllers as input (with up to 8 buttons, each)
 - Built-in editors: for code, sprites, world maps, sound effects and music
@@ -45,7 +46,7 @@ You can play and share games, tools and music at [https://tic80.com/play](https:
 The community also hangs out and discusses on [Telegram](https://t.me/tic80) or [Discord](https://discord.gg/DkD73dP).
 
 # Contributing
-You are can contribute by issuing a bug or requesting a new feature on our [issues page](https://github.com/nesbox/tic.computer/issues).
+You can contribute by issuing a bug or requesting a new feature on our [issues page](https://github.com/nesbox/tic.computer/issues).
 Keep in mind when engaging on a discussion to follow our [Code of Conduct](https://github.com/nesbox/TIC-80/blob/master/CODE_OF_CONDUCT.md).
 
 You can also contribute by reviewing or improving our [wiki](https://github.com/nesbox/TIC-80/wiki).
@@ -96,11 +97,43 @@ sudo sh cmake-3.12.0-Linux-x86_64.sh --skip-license --prefix=/usr
 
 run the following commands in the Terminal
 ```
-sudo apt-get install g++ git cmake libgtk-3-dev libglvnd-dev libglu1-mesa-dev freeglut3-dev -y
+sudo apt-get install g++ git cmake libgtk-3-dev libglvnd-dev libglu1-mesa-dev freeglut3-dev libasound2-dev -y
 git clone --recursive https://github.com/nesbox/TIC-80 && cd TIC-80/build
 cmake ..
 make -j4
 ```
+
+### Raspberry Pi (Retropie)
+
+First, add jessie-backports repo to your `/etc/apt/sources.list`
+
+`deb http://ftp.debian.org/debian jessie-backports main`  
+
+Then run the following commands in the Terminal
+
+```
+# required public keys
+gpg --keyserver pgpkeys.mit.edu --recv-key  8B48AD6246925553      
+gpg -a --export 8B48AD6246925553 | sudo apt-key add -
+gpg --keyserver pgpkeys.mit.edu --recv-key 7638D0442B90D010
+gpg -a --export 7638D0442B90D010 | sudo apt-key add -
+
+# upgrade system
+sudo apt-get update
+sudo apt-get dist-upgrade
+
+# install software
+sudo apt-get install git build-essential libgtk-3-dev libsdl2-dev zlib1g-dev
+sudo apt-get install -t jessie-backports liblua5.3-dev
+git clone --recursive https://github.com/nesbox/TIC-80 && cd TIC-80/build
+cmake ..
+make -j4
+```
+
+_Note:_ If you are using a normal Raspberry Pi image (not Retropie) you may not
+have OpenGL drivers enabled. Run `sudo raspi-config`, then select 7
+for "Advanced Options", followed by 6 for "GL Drivers", and enable "GL
+(Fake KMS) Desktop Driver". After changing this setting, reboot.
 
 ## Mac
 install `Command Line Tools for Xcode` and `brew` package manager
@@ -138,3 +171,5 @@ You can find iOS/tvOS version here
 * Damien de Lemeny - [GitHub @ddelemeny](https://github.com/ddelemeny)
 * Adrian Siekierka - [GitHub @asiekierka](https://github.com/asiekierka) [Website](https://asie.pl/)
 * Jay Em (Sweetie16 palette) - [Twitter @GrafxKid](https://twitter.com/GrafxKid)  
+* msx80 - [Twitter @msx80](https://twitter.com/msx80) [Github msx80](https://github.com/msx80)
+* Josh Goebel - [Twitter @dreamer3](https://twitter.com/dreamer3) [Github joshgoebel](https://github.com/joshgoebel)

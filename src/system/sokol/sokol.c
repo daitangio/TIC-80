@@ -22,12 +22,16 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include <limits.h>
 
 #include "studio/system.h"
 #include "system/sokol/sokol.h"
-#include "ext/net.h"
+
+#if defined(__TIC_WINDOWS__)
+#include <windows.h>
+#endif
 
 static struct
 {
@@ -36,6 +40,7 @@ static struct
     struct
     {
         bool state[tic_keys_count];
+        char text;
     } keyboard;
 
     struct
@@ -46,11 +51,9 @@ static struct
 
     char* clipboard;
 
-    Net* net;
-
 } platform;
 
-static void setClipboardText(const char* text)
+void tic_sys_clipboard_set(const char* text)
 {
     if(platform.clipboard)
     {
@@ -61,59 +64,49 @@ static void setClipboardText(const char* text)
     platform.clipboard = strdup(text);
 }
 
-static bool hasClipboardText()
+bool tic_sys_clipboard_has()
 {
     return platform.clipboard != NULL;
 }
 
-static char* getClipboardText()
+char* tic_sys_clipboard_get()
 {
     return platform.clipboard ? strdup(platform.clipboard) : NULL;
 }
 
-static void freeClipboardText(const char* text)
+void tic_sys_clipboard_free(const char* text)
 {
     free((void*)text);
 }
 
-static u64 getPerformanceCounter()
+u64 tic_sys_counter_get()
 {
     return stm_now();
 }
 
-static u64 getPerformanceFrequency()
+u64 tic_sys_freq_get()
 {
     return 1000000000;
 }
 
-static void* httpGetSync(const char* url, s32* size)
-{
-    return netGetSync(platform.net, url, size);
-}
-
-static void httpGet(const char* url, HttpGetCallback callback, void* calldata)
-{
-    return netGet(platform.net, url, callback, calldata);
-}
-
-static void goFullscreen()
+void tic_sys_fullscreen()
 {
 }
 
-static void showMessageBox(const char* title, const char* message)
+void tic_sys_message(const char* title, const char* message)
 {
 }
 
-static void setWindowTitle(const char* title)
+void tic_sys_title(const char* title)
 {
 }
 
-static void openSystemPath(const char* path)
+void tic_sys_open_path(const char* path)
 {
 
 }
 
-static void preseed()
+void tic_sys_preseed()
 {
 #if defined(__TIC_MACOSX__)
     srandom(time(NULL));
@@ -124,41 +117,21 @@ static void preseed()
 #endif
 }
 
-static void pollEvent()
+void tic_sys_poll()
 {
 
 }
 
-static void updateConfig()
+void tic_sys_update_config()
 {
 
 }
 
-static System systemInterface = 
+bool tic_sys_keyboard_text(char* text)
 {
-    .setClipboardText = setClipboardText,
-    .hasClipboardText = hasClipboardText,
-    .getClipboardText = getClipboardText,
-    .freeClipboardText = freeClipboardText,
-
-    .getPerformanceCounter = getPerformanceCounter,
-    .getPerformanceFrequency = getPerformanceFrequency,
-
-    .httpGetSync = httpGetSync,
-    .httpGet = httpGet,
-
-    .fileDialogLoad = file_dialog_load,
-    .fileDialogSave = file_dialog_save,
-
-    .goFullscreen = goFullscreen,
-    .showMessageBox = showMessageBox,
-    .setWindowTitle = setWindowTitle,
-
-    .openSystemPath = openSystemPath,
-    .preseed = preseed,
-    .poll = pollEvent,
-    .updateConfig = updateConfig,
-};
+    *text = platform.keyboard.text;
+    return true;
+}
 
 static void app_init(void)
 {
@@ -187,8 +160,6 @@ static void app_frame(void)
 {
     if(platform.studio->quit) exit(0);
 
-    netTick(platform.net);
-
     tic_mem* tic = platform.studio->tic;
     tic80_input* input = &tic->ram.input;
 
@@ -205,6 +176,7 @@ static void app_frame(void)
     saudio_push(platform.audio.samples, count / 2);
     
     input->mouse.scrollx = input->mouse.scrolly = 0;
+    platform.keyboard.text = '\0';
 }
 
 static void handleKeydown(sapp_keycode keycode, bool down)
@@ -377,19 +349,23 @@ static void app_input(const sapp_event* event)
         break;
     case SAPP_EVENTTYPE_CHAR:
         if(event->char_code < 128)
-            platform.studio->text = event->char_code;
+            platform.keyboard.text = event->char_code;
         break;
     case SAPP_EVENTTYPE_MOUSE_MOVE:
         {
             struct {s32 x, y, w, h;}rect;
             sokol_calc_viewport(&rect.x, &rect.y, &rect.w, &rect.h);
 
-            s32 mx = -1, my = -1;
-            if(rect.w) mx = ((s32)event->mouse_x - rect.x) * TIC80_FULLWIDTH / rect.w - TIC80_OFFSET_LEFT;
-            if(rect.h) my = ((s32)event->mouse_y - rect.y) * TIC80_FULLHEIGHT / rect.h - TIC80_OFFSET_TOP;
-
-            input->mouse.x = mx >= 0 && mx < 0xff ? mx : 0xff;
-            input->mouse.y = my >= 0 && my < 0xff ? my : 0xff;
+            if (rect.w) {
+                s32 temp_x = ((s32)event->mouse_x - rect.x) * TIC80_FULLWIDTH / rect.w;
+                if (temp_x < 0) temp_x = 0; else if (temp_x >= TIC80_FULLWIDTH) temp_x = TIC80_FULLWIDTH-1; // clip: 0 to TIC80_FULLWIDTH-1
+                input->mouse.x = temp_x;
+            }
+            if (rect.h) {
+                s32 temp_y = ((s32)event->mouse_y - rect.y) * TIC80_FULLHEIGHT / rect.h;
+                if (temp_y < 0) temp_y = 0; else if (temp_y >= TIC80_FULLHEIGHT) temp_y = TIC80_FULLHEIGHT-1; // clip: 0 to TIC80_FULLHEIGHT-1
+                input->mouse.y = temp_y;
+            }
         }
         break;
     case SAPP_EVENTTYPE_MOUSE_DOWN: 
@@ -410,20 +386,25 @@ static void app_input(const sapp_event* event)
 static void app_cleanup(void)
 {
     platform.studio->close();
-    closeNet(platform.net);
     free(platform.audio.samples);
 }
 
 sapp_desc sokol_main(s32 argc, char* argv[])
 {
+#if defined(__TIC_WINDOWS__)
+    {
+        CONSOLE_SCREEN_BUFFER_INFO info;
+        if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &info) && !info.dwCursorPosition.X && !info.dwCursorPosition.Y)
+            FreeConsole();
+    }
+#endif
+
     memset(&platform, 0, sizeof platform);
 
     platform.audio.desc.num_channels = TIC_STEREO_CHANNELS;
     saudio_setup(&platform.audio.desc);
 
-    platform.net = createNet();
-
-    platform.studio = studioInit(argc, argv, saudio_sample_rate(), "./", &systemInterface);
+    platform.studio = studioInit(argc, (const char**)argv, saudio_sample_rate(), "./");
 
     const s32 Width = TIC80_FULLWIDTH * platform.studio->config()->uiScale;
     const s32 Height = TIC80_FULLHEIGHT * platform.studio->config()->uiScale;

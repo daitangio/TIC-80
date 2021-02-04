@@ -60,7 +60,7 @@ static duk_ret_t duk_print(duk_context* duk)
     const char* text = duk_to_string(duk, 0);
     s32 x = duk_opt_int(duk, 1, 0);
     s32 y = duk_opt_int(duk, 2, 0);
-    s32 color = duk_opt_int(duk, 3, TIC_PALETTE_SIZE - 1);
+    s32 color = duk_opt_int(duk, 3, TIC_DEFAULT_COLOR);
     bool fixed = duk_opt_boolean(duk, 4, false);
     s32 scale = duk_opt_int(duk, 5, 1);
     bool alt = duk_opt_boolean(duk, 6, false);
@@ -252,7 +252,7 @@ static s32 duk_key(duk_context* duk)
     {
         tic_key key = duk_to_int(duk, 0);
 
-        if(key < tic_key_escape)
+        if(key < tic_keys_count)
             duk_push_boolean(duk, tic_api_key(tic, key));
         else return duk_error(duk, DUK_ERR_ERROR, "unknown keyboard code\n");
     }
@@ -273,7 +273,7 @@ static s32 duk_keyp(duk_context* duk)
     {
         tic_key key = duk_to_int(duk, 0);
 
-        if(key >= tic_key_escape)
+        if(key >= tic_keys_count)
         {
             return duk_error(duk, DUK_ERR_ERROR, "unknown keyboard code\n");
         }
@@ -343,12 +343,25 @@ static duk_ret_t duk_sfx(duk_context* duk)
 
     s32 duration = duk_opt_int(duk, 2, -1);
     s32 channel = duk_opt_int(duk, 3, 0);
-    s32 volume = duk_opt_int(duk, 4, MAX_VOLUME);
+    s32 volumes[TIC_STEREO_CHANNELS];
+
+    if(duk_is_array(duk, 4))
+    {
+        for(s32 i = 0; i < COUNT_OF(volumes); i++)
+        {
+            duk_get_prop_index(duk, 4, i);
+            if(!duk_is_null_or_undefined(duk, -1))
+                volumes[i] = duk_to_int(duk, -1);
+            duk_pop(duk);
+        }
+    }
+    else volumes[0] = volumes[1] = duk_opt_int(duk, 4, MAX_VOLUME);
+
     speed = duk_opt_int(duk, 5, speed);
 
     if (channel >= 0 && channel < TIC_SOUND_CHANNELS)
     {
-        tic_api_sfx(tic, index, note, octave, duration, channel, volume & 0xf, speed);
+        tic_api_sfx(tic, index, note, octave, duration, channel, volumes[0] & 0xf, volumes[1] & 0xf, speed);
     }
     else return duk_error(duk, DUK_ERR_ERROR, "unknown channel\n");
 
@@ -547,7 +560,7 @@ static duk_ret_t duk_trace(duk_context* duk)
     tic_mem* tic = (tic_mem*)getDukCore(duk);
 
     const char* text = duk_opt_string(duk, 0, "");
-    u8 color = duk_opt_int(duk, 1, tic_color_12);
+    u8 color = duk_opt_int(duk, 1, TIC_DEFAULT_COLOR);
 
     tic_api_trace(tic, text, color);
 
@@ -635,10 +648,16 @@ static duk_ret_t duk_mouse(duk_context* duk)
     const tic80_mouse* mouse = &core->memory.ram.input.mouse;
 
     duk_idx_t idx = duk_push_array(duk);
-    duk_push_int(duk, mouse->x);
-    duk_put_prop_index(duk, idx, 0);
-    duk_push_int(duk, mouse->y);
-    duk_put_prop_index(duk, idx, 1);
+
+    {
+        tic_point pos = tic_api_mouse((tic_mem*)core);
+
+        duk_push_int(duk, pos.x);
+        duk_put_prop_index(duk, idx, 0);
+        duk_push_int(duk, pos.y);
+        duk_put_prop_index(duk, idx, 1);
+    }
+
     duk_push_boolean(duk, mouse->left);
     duk_put_prop_index(duk, idx, 2);
     duk_push_boolean(duk, mouse->middle);
@@ -779,8 +798,8 @@ static duk_ret_t duk_music(duk_context* duk)
     {
         s32 frame = duk_opt_int(duk, 1, -1);
         s32 row = duk_opt_int(duk, 2, -1);
-        bool loop = duk_opt_int(duk, 3, true);
-        bool sustain = duk_opt_int(duk, 4, false);
+        bool loop = duk_opt_boolean(duk, 3, true);
+        bool sustain = duk_opt_boolean(duk, 4, false);
 
         tic_api_music(tic, track, frame, row, loop, sustain);
     }
